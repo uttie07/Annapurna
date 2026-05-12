@@ -6,9 +6,30 @@
   # Use https://search.nixos.org/packages to find packages
   packages = [
     pkgs.nodejs_22
+    pkgs.rustup
+    pkgs.pkg-config
+    pkgs.stdenv.cc
+    pkgs.openssl
+    pkgs.libiconv
+    pkgs.glib
+    pkgs.gtk3
+    pkgs.webkitgtk
+    pkgs.pango
+    pkgs.cairo
+    pkgs.gdk-pixbuf
+    pkgs.atk
+    pkgs.harfbuzz
+    pkgs.libsoup
+    pkgs.libsoup_3
+    pkgs.dbus
+    pkgs.zlib
   ];
   # Sets environment variables in the workspace
-  env = {};
+  env = {
+    # 全てのライブラリのパスを PKG_CONFIG_PATH に連結します
+    PKG_CONFIG_PATH = "${pkgs.glib.dev}/lib/pkgconfig:${pkgs.gtk3.dev}/lib/pkgconfig:${pkgs.webkitgtk_4_1.dev}/lib/pkgconfig:${pkgs.openssl.dev}/lib/pkgconfig:${pkgs.pango.dev}/lib/pkgconfig:${pkgs.cairo.dev}/lib/pkgconfig:${pkgs.gdk-pixbuf.dev}/lib/pkgconfig:${pkgs.atk.dev}/lib/pkgconfig:${pkgs.harfbuzz.dev}/lib/pkgconfig:${pkgs.libsoup_3.dev}/lib/pkgconfig:${pkgs.dbus.dev}/lib/pkgconfig:${pkgs.librsvg.dev}/lib/pkgconfig:${pkgs.zlib.dev}/lib/pkgconfig";
+    LIBRARY_PATH = "${pkgs.zlib}/lib";
+  };
   idx = {
     # Search for the extensions you want on https://open-vsx.org/ and use "publisher.id"
     extensions = [
