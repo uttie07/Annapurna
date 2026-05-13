@@ -42,6 +42,33 @@ function App() {
     else document.documentElement.classList.remove('dark');
   }, [isDarkMode]);
 
+  // 日時の整形用ヘルパー関数
+  const formatEmailDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      return `${y}-${m}-${day} ${hh}:${mm}`;
+    } catch (e) {
+      return dateStr;
+    }
+  };
+
+  // 送信元から名前だけを抽出するヘルパー関数
+  const formatSenderName = (fromStr: string) => {
+    if (!fromStr) return '不明な送信元';
+    const match = fromStr.match(/^"?([^"<]+)"?\s*<.*>$/) || fromStr.match(/^([^<]+)/);
+    if (match && match[1]) {
+      return match[1].trim();
+    }
+    return fromStr;
+  };
+
   const fetchEmails = async () => {
     setIsRefreshing(true);
     const isTauri = '__TAURI_INTERNALS__' in window;
@@ -49,22 +76,26 @@ function App() {
     if (isTauri) {
       try {
         const data = await invoke('get_emails') as any[];
-        const realEmails: Email[] = data.map((e) => ({
-          id: String(e.id),
-          subject: e.subject || '(件名なし)',
-          from: e.from || '不明な送信元',
-          date: e.date || '',
-          snippet: '',
-          body: '',
-          aiCategories: [],
-          isRead: true,
-          isFlagged: false,
-          isAnswered: false,
-          isDraft: false,
-          isDeleted: false,
-          hasAttachment: false,
-          account: activeAccount
-        }));
+        const realEmails: Email[] = data.map((e) => {
+          const flags = e.flags || [];
+          return {
+            id: String(e.id),
+            subject: e.subject || '(件名なし)',
+            from: formatSenderName(e.from),
+            date: formatEmailDate(e.date),
+            snippet: '',
+            body: '',
+            aiCategories: [],
+            // email-libの標準フラグ 'Seen' があれば既読
+            isRead: flags.includes('Seen'),
+            isFlagged: flags.includes('Flagged'),
+            isAnswered: flags.includes('Answered'),
+            isDraft: flags.includes('Draft'),
+            isDeleted: flags.includes('Deleted'),
+            hasAttachment: false, // 添付ファイル判定は今後の拡張
+            account: activeAccount
+          };
+        });
         setEmails(realEmails);
       } catch (e) {
         console.error("Rust呼び出しエラー:", e);
@@ -72,11 +103,12 @@ function App() {
         setIsRefreshing(false);
       }
     } else {
+      // ブラウザ用モック
       setTimeout(() => {
         const mockData: Email[] = [
-          { id: "1", account: "work", subject: "【重要】サーバーメンテナンスのお知らせ", from: "admin@use-inc.co.jp", date: "2026-05-13 10:00", snippet: "", body: "", aiCategories: ["重要"], hasAttachment: true, isRead: false, isFlagged: true, isAnswered: false, isDraft: false, isDeleted: false },
-          { id: "2", account: "work", subject: "Re: 今週のプロジェクト進捗ミーティング", from: "team-lead@example.com", date: "2026-05-12 14:30", snippet: "", body: "", aiCategories: ["会議"], hasAttachment: false, isRead: true, isFlagged: false, isAnswered: true, isDraft: false, isDeleted: false },
-          { id: "3", account: "personal", subject: "GitHub: 5 new notifications", from: "notifications@github.com", date: "2026-05-11 08:15", snippet: "", body: "", aiCategories: ["通知"], hasAttachment: false, isRead: false, isFlagged: false, isAnswered: false, isDraft: false, isDeleted: false },
+          { id: "1", account: "work", subject: "【重要】サーバーメンテナンスのお知らせ", from: "管理者", date: "2026-05-13 10:00", snippet: "", body: "", aiCategories: ["重要"], hasAttachment: true, isRead: false, isFlagged: true, isAnswered: false, isDraft: false, isDeleted: false },
+          { id: "2", account: "work", subject: "Re: 今週のプロジェクト進捗ミーティング", from: "プロジェクトリーダー", date: "2026-05-12 14:30", snippet: "", body: "", aiCategories: ["会議"], hasAttachment: false, isRead: true, isFlagged: false, isAnswered: true, isDraft: false, isDeleted: false },
+          { id: "3", account: "personal", subject: "GitHub: 5 new notifications", from: "GitHub", date: "2026-05-11 08:15", snippet: "", body: "", aiCategories: ["通知"], hasAttachment: false, isRead: false, isFlagged: false, isAnswered: false, isDraft: false, isDeleted: false },
         ];
         setEmails(mockData.filter(m => m.account === activeAccount));
         setIsRefreshing(false);
@@ -93,12 +125,13 @@ function App() {
 
     if (isTauri) {
       try {
-        // Rust側で get_email_content が実装されている前提
         const content = await invoke<string>('get_email_content', { id: email.id });
         setReadingEmail(prev => prev ? { ...prev, body: content } : null);
+        // 読んだら既読にする（UI上の即時反映）
+        setEmails(prev => prev.map(e => e.id === email.id ? { ...e, isRead: true } : e));
       } catch (e) {
         console.error(e);
-        setReadingEmail(prev => prev ? { ...prev, body: "本文の取得に失敗しました。Rust側のコマンド実装を確認してください。" } : null);
+        setReadingEmail(prev => prev ? { ...prev, body: "本文の取得に失敗しました。" } : null);
       } finally {
         setIsReadingContent(false);
       }
@@ -110,6 +143,7 @@ function App() {
     }
   };
 
+  // AI解析シミュレーション
   useEffect(() => {
     if (readingEmail && !isReadingContent) {
       setIsAnalyzing(true);
@@ -195,31 +229,27 @@ function App() {
   return (
       <div className={`app-container ${isDarkMode ? 'dark' : ''}`}>
         <div className="account-bar">
-          <div className={`account-icon ${activeAccount === 'work' ? 'active' : ''}`} onClick={() => {setActiveAccount('work'); setReadingEmail(null);}}>W{counts.workHasUnread && <div className="account-dot"></div>}</div>
-          <div className={`account-icon ${activeAccount === 'personal' ? 'active' : ''}`} onClick={() => {setActiveAccount('personal'); setReadingEmail(null);}}>P{counts.personalHasUnread && <div className="account-dot"></div>}</div>
+          <div className={`account-icon ${activeAccount === 'work' ? 'active' : ''}`} onClick={() => { setActiveAccount('work'); setReadingEmail(null); }}>W{counts.workHasUnread && <div className="account-dot"></div>}</div>
+          <div className={`account-icon ${activeAccount === 'personal' ? 'active' : ''}`} onClick={() => { setActiveAccount('personal'); setReadingEmail(null); }}>P{counts.personalHasUnread && <div className="account-dot"></div>}</div>
           <div style={{ width: '32px', height: '2px', backgroundColor: '#1f2937', margin: '4px 0' }}></div>
           <div className="account-icon" style={{ border: '1px dashed #4b5563', backgroundColor: 'transparent' }}><Plus size={20} /></div>
         </div>
 
         <div className="sidebar">
           <div className="sidebar-title"><MountainSnow size={24} color="#60a5fa" /> Annapurna</div>
-
           <div className="sidebar-label">メイン</div>
-          <div className={`sidebar-item ${activeFolder === 'inbox' ? 'active' : ''}`} onClick={() => {setActiveFolder('inbox'); setReadingEmail(null);}}>
+          <div className={`sidebar-item ${activeFolder === 'inbox' ? 'active' : ''}`} onClick={() => { setActiveFolder('inbox'); setReadingEmail(null); }}>
             <Inbox size={18} /> 受信トレイ {counts.inboxCount > 0 && <span className="sidebar-unread-count">{counts.inboxCount}</span>}
           </div>
-
           <div className="sidebar-label">AI Smart</div>
-          <div className={`sidebar-item ${activeFolder === 'urgent' ? 'active' : ''}`} onClick={() => {setActiveFolder('urgent'); setReadingEmail(null);}}><Zap size={18} color="#f59e0b" /> 至急対応 {counts.urgentCount > 0 && <span className="sidebar-unread-count">{counts.urgentCount}</span>}</div>
-
+          <div className={`sidebar-item ${activeFolder === 'urgent' ? 'active' : ''}`} onClick={() => { setActiveFolder('urgent'); setReadingEmail(null); }}><Zap size={18} color="#f59e0b" /> 至急対応 {counts.urgentCount > 0 && <span className="sidebar-unread-count">{counts.urgentCount}</span>}</div>
           <div className="sidebar-label">フォルダ</div>
-          <div className={`sidebar-item ${activeFolder === 'flagged' ? 'active' : ''}`} onClick={() => {setActiveFolder('flagged'); setReadingEmail(null);}}>
+          <div className={`sidebar-item ${activeFolder === 'flagged' ? 'active' : ''}`} onClick={() => { setActiveFolder('flagged'); setReadingEmail(null); }}>
             <Star size={18} color={activeFolder === 'flagged' ? "#eab308" : "currentColor"} /> 星付き {counts.flaggedCount > 0 && <span className="sidebar-unread-count">{counts.flaggedCount}</span>}
           </div>
-          <div className={`sidebar-item ${activeFolder === 'drafts' ? 'active' : ''}`} onClick={() => {setActiveFolder('drafts'); setReadingEmail(null);}}>
+          <div className={`sidebar-item ${activeFolder === 'drafts' ? 'active' : ''}`} onClick={() => { setActiveFolder('drafts'); setReadingEmail(null); }}>
             <FileEdit size={18} /> 下書き
           </div>
-
           <div className="theme-toggle-container">
             <button className="theme-toggle-btn" onClick={() => setIsDarkMode(!isDarkMode)}>
               {isDarkMode ? <Sun size={18} /> : <Moon size={18} />} {isDarkMode ? 'ライトモード' : 'ダークモード'}
@@ -237,7 +267,7 @@ function App() {
                   <div className="detail-body-scroll">
                     <div className="detail-header">
                       <h2 className="detail-subject">
-                        {readingEmail.isFlagged && <Star size={20} fill="#eab308" color="#eab308" style={{display: 'inline', marginRight: '8px', verticalAlign: 'text-bottom'}} />}
+                        {readingEmail.isFlagged && <Star size={20} fill="#eab308" color="#eab308" style={{ display: 'inline', marginRight: '8px', verticalAlign: 'text-bottom' }} />}
                         {readingEmail.subject}
                       </h2>
                       <div className="detail-meta"><span>{readingEmail.from}</span><span>{readingEmail.date}</span></div>
@@ -273,7 +303,7 @@ function App() {
                             <button className="draft-suggest-btn" onClick={() => generateDraft('承諾')}>承知した</button>
                           </div>
                           {isDrafting ? (
-                              <div className="ai-loading" style={{height: '60px'}}><RefreshCw size={16} className="spin" /><span>生成中...</span></div>
+                              <div className="ai-loading" style={{ height: '60px' }}><RefreshCw size={16} className="spin" /><span>生成中...</span></div>
                           ) : aiDraft && (
                               <div className="ai-draft-result">
                                 <div className="ai-draft-content">{aiDraft}</div>
@@ -290,7 +320,7 @@ function App() {
                 <div className="header"><h2><Inbox size={24} /> {activeFolder === 'inbox' ? '受信トレイ' : 'フォルダ'}</h2><button className="icon-button" onClick={fetchEmails} disabled={isRefreshing}><RefreshCw size={20} className={isRefreshing ? "spin" : ""} /></button></div>
                 <div className="header-controls">
                   {selectedIds.length > 0 ? (
-                      <div className="action-bar"><span className="action-text">{selectedIds.length} 件選択</span><button className="icon-button" onClick={() => handleBulkAction('read')} title="既読"><CheckCircle size={20}/></button><button className="icon-button" onClick={() => handleBulkAction('delete')} title="削除"><Trash2 size={20}/></button></div>
+                      <div className="action-bar"><span className="action-text">{selectedIds.length} 件選択</span><button className="icon-button" onClick={() => handleBulkAction('read')} title="既読"><CheckCircle size={20} /></button><button className="icon-button" onClick={() => handleBulkAction('delete')} title="削除"><Trash2 size={20} /></button></div>
                   ) : (
                       <div className="search-container"><Search size={18} className="search-icon" /><input type="text" className="search-input" placeholder="検索..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} /></div>
                   )}
@@ -324,12 +354,13 @@ function App() {
                         <div className="cell-actions-container">
                           <div className="item-attachment">{email.hasAttachment && <Paperclip size={18} />}</div>
                           <div className="hover-actions">
-                            <button className="hover-btn" onClick={(e) => toggleReadStatus(email.id, e)}><Eye size={18} /></button>
-                            <button className="hover-btn" onClick={(e) => deleteEmail(email.id, e)}><Trash2 size={18} /></button>
+                            <button className="hover-btn" onClick={(e) => toggleReadStatus(email.id, e)} title={email.isRead ? "未読にする" : "既読にする"}><Eye size={18} /></button>
+                            <button className="hover-btn" onClick={(e) => deleteEmail(email.id, e)} title="削除"><Trash2 size={18} /></button>
                           </div>
                         </div>
                       </div>
                   ))}
+                  {filteredAndSortedEmails.length === 0 && <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>メールが見つかりません</div>}
                 </div>
               </>
           )}

@@ -73,7 +73,7 @@ async fn get_emails() -> Result<Vec<EmailEnvelope>, String> {
 
     // 6. メール一覧の取得
     let opts = ListEnvelopesOptions {
-        page_size: 10,
+        page_size: 100,
         page: 0,
         query: None,
     };
