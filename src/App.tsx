@@ -1,16 +1,17 @@
 import { invoke } from '@tauri-apps/api/core';
 import { useEffect, useState, useMemo } from 'react';
 import { 
-  Mail, Inbox, Sparkles, Paperclip, 
+  MountainSnow, Inbox, Paperclip, 
   ChevronUp, ChevronDown, RefreshCw, ArrowLeft, Plus, Search,
-  CheckCircle, Trash2, X, Eye, Zap, MessageSquare, Calendar, CreditCard,
-  Sun, Moon, CornerUpLeft, Send // ← ここに Send を復帰させました
+  CheckCircle, Trash2, X, Eye, Sun, Moon, CornerUpLeft, Send,
+  Star, Reply, FileEdit, Sparkles, MessageSquare, Zap
 } from 'lucide-react';
 import './App.css';
 
 type Email = { 
   id: string; subject: string; from: string; date: string; snippet: string; 
-  body: string; aiCategories: string[]; isRead: boolean; hasAttachment: boolean; account: string;
+  body: string; account: string; hasAttachment: boolean;
+  isRead: boolean; isFlagged: boolean; isAnswered: boolean; isDraft: boolean; isDeleted: boolean;
 };
 
 type SortConfig = { key: keyof Email; direction: 'asc' | 'desc'; } | null;
@@ -20,7 +21,10 @@ function App() {
   const [sortConfig, setSortConfig] = useState<SortConfig>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  
   const [readingEmail, setReadingEmail] = useState<Email | null>(null);
+  const [isReadingContent, setIsReadingContent] = useState<boolean>(false);
+
   const [activeAccount, setActiveAccount] = useState<string>('work');
   const [activeFolder, setActiveFolder] = useState<string>('inbox');
   
@@ -41,53 +45,88 @@ function App() {
   const fetchEmails = async () => {
     setIsRefreshing(true);
     const isTauri = '__TAURI_INTERNALS__' in window;
+    
     if (isTauri) {
       try {
         const data = await invoke('get_emails', { account: activeAccount });
         if (Array.isArray(data)) setEmails(data as Email[]);
       } catch (e) { console.error(e); }
+    } else {
+      setTimeout(() => {
+        const mockData: Email[] = [
+          { id: "1", account: "work", subject: "【重要】サーバーメンテナンスのお知らせ", from: "admin@use-inc.co.jp", date: "2026-05-13 10:00", snippet: "", body: "", hasAttachment: true, isRead: false, isFlagged: true, isAnswered: false, isDraft: false, isDeleted: false },
+          { id: "2", account: "work", subject: "Re: 今週のプロジェクト進捗ミーティング", from: "team-lead@example.com", date: "2026-05-12 14:30", snippet: "", body: "", hasAttachment: false, isRead: true, isFlagged: false, isAnswered: true, isDraft: false, isDeleted: false },
+          { id: "3", account: "personal", subject: "GitHub: 5 new notifications", from: "notifications@github.com", date: "2026-05-11 08:15", snippet: "", body: "", hasAttachment: false, isRead: false, isFlagged: false, isAnswered: false, isDraft: false, isDeleted: false },
+          { id: "4", account: "work", subject: "（無題）", from: "uchimura@use-inc.co.jp", date: "2026-05-10 18:00", snippet: "", body: "", hasAttachment: false, isRead: true, isFlagged: false, isAnswered: false, isDraft: true, isDeleted: false },
+        ];
+        setEmails(mockData);
+      }, 500);
     }
-
-    setTimeout(() => {
-      const mockData = [
-        { id: "1", account: "work", subject: "【重要】サーバーメンテナンスのお知らせ", from: "admin@use-inc.co.jp", date: "2026-05-11 10:00", snippet: "", aiCategories: ["重要", "要確認"], isRead: false, hasAttachment: true, body: "社員各位\n\n定期サーバーメンテナンスを実施いたします。" },
-        { id: "2", account: "work", subject: "今週のプロジェクト進捗ミーティング", from: "team-lead@example.com", date: "2026-05-10 14:30", snippet: "", aiCategories: ["社内業務", "会議"], isRead: true, hasAttachment: false, body: "明日の14時からです。アジェンダを確認してください。" },
-        { id: "3", account: "personal", subject: "GitHub: 5 new notifications", from: "notifications@github.com", date: "2026-05-09 08:15", snippet: "", aiCategories: ["通知"], isRead: false, hasAttachment: false, body: "Check your dashboard for PR status." }
-      ];
-      setEmails(mockData);
-      setIsRefreshing(false);
-    }, 500);
+    setIsRefreshing(false);
   };
 
   useEffect(() => { fetchEmails(); }, [activeAccount]);
 
+  const handleSelectEmail = async (email: Email) => {
+    setReadingEmail(email);
+    setIsReadingContent(true);
+
+    const isTauri = '__TAURI_INTERNALS__' in window;
+
+    if (isTauri) {
+      try {
+        const content = await invoke<string>('get_email_content', { id: email.id });
+        setReadingEmail(prev => prev ? { ...prev, body: content } : null);
+      } catch (e) {
+        console.error(e);
+        setReadingEmail(prev => prev ? { ...prev, body: "エラー: 本文を読み込めませんでした。" } : null);
+      } finally {
+        setIsReadingContent(false);
+      }
+    } else {
+      setTimeout(() => {
+        let mockBody = "";
+        if (email.id === "1") {
+          mockBody = "社員各位\n\nお疲れ様です。内村です。\n\n今週末にかけて、社内基幹システムの定期メンテナンスを実施いたします。\n期間中は各種システムがご利用いただけません。\n\nご不便をおかけしますが、ご協力のほどよろしくお願いいたします。";
+        } else if (email.id === "2") {
+          mockBody = "チームの皆様\n\n明日の14時から予定している進捗ミーティングですが、\n事前に添付のドキュメントに目を通しておいてください。\n\n特にUIの実装方針について、意見交換をしたいと考えています。\nよろしくお願いいたします。";
+        } else {
+          mockBody = "これはUI開発用のダミー本文です。\n\n現在はブラウザ環境で実行されているため、Tauriのバックエンド（Rust）をバイパスしてこのテキストを表示しています。";
+        }
+        
+        setReadingEmail(prev => prev ? { ...prev, body: mockBody } : null);
+        setIsReadingContent(false);
+      }, 800);
+    }
+  };
+
   useEffect(() => {
-    if (readingEmail) {
+    if (readingEmail && !isReadingContent) {
       setIsAnalyzing(true);
       setAiDraft(null);
       setReplyText('');
       const timer = setTimeout(() => setIsAnalyzing(false), 800);
       return () => clearTimeout(timer);
     }
-  }, [readingEmail]);
+  }, [readingEmail, isReadingContent]);
 
   const counts = useMemo(() => {
     const accEmails = emails.filter(e => e.account === activeAccount);
     return {
       workHasUnread: emails.some(e => e.account === 'work' && !e.isRead),
       personalHasUnread: emails.some(e => e.account === 'personal' && !e.isRead),
-      inboxCount: accEmails.filter(e => !e.isRead).length,
-      urgentCount: accEmails.filter(e => e.aiCategories.includes("重要") || e.aiCategories.includes("至急")).length,
-      scheduleCount: accEmails.filter(e => e.aiCategories.includes("会議")).length,
-      financeCount: accEmails.filter(e => e.aiCategories.includes("経理")).length
+      inboxCount: accEmails.filter(e => !e.isRead && !e.isDeleted && !e.isDraft).length,
+      flaggedCount: accEmails.filter(e => e.isFlagged && !e.isDeleted).length,
+      draftCount: accEmails.filter(e => e.isDraft && !e.isDeleted).length,
     };
   }, [emails, activeAccount]);
 
   const filteredAndSortedEmails = useMemo(() => {
     let result = emails.filter(e => e.account === activeAccount);
-    if (activeFolder === 'urgent') result = result.filter(e => e.aiCategories.includes("重要") || e.aiCategories.includes("至急"));
-    else if (activeFolder === 'schedule') result = result.filter(e => e.aiCategories.includes("会議"));
-    else if (activeFolder === 'finance') result = result.filter(e => e.aiCategories.includes("経理"));
+    if (activeFolder === 'inbox') result = result.filter(e => !e.isDeleted && !e.isDraft);
+    else if (activeFolder === 'flagged') result = result.filter(e => e.isFlagged && !e.isDeleted);
+    else if (activeFolder === 'drafts') result = result.filter(e => e.isDraft && !e.isDeleted);
+    else if (activeFolder === 'trash') result = result.filter(e => e.isDeleted);
     
     if (filterUnread) result = result.filter(e => !e.isRead);
     if (searchQuery) {
@@ -103,8 +142,6 @@ function App() {
     }
     return result;
   }, [emails, activeAccount, activeFolder, searchQuery, filterUnread, sortConfig]);
-
-  const getBadgeClass = (t: string) => (t.includes("重要") || t.includes("至急")) ? "badge badge-urgent" : "badge badge-update";
   
   const renderSortIcon = (k: keyof Email) => {
     if (sortConfig?.key !== k) return <ChevronDown size={14} color="#ccc" />;
@@ -124,9 +161,14 @@ function App() {
     setEmails(prev => prev.map(e => e.id === id ? { ...e, isRead: !e.isRead } : e));
   };
 
+  const toggleFlagStatus = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEmails(prev => prev.map(e => e.id === id ? { ...e, isFlagged: !e.isFlagged } : e));
+  };
+
   const deleteEmail = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setEmails(prev => prev.filter(e => e.id !== id));
+    setEmails(prev => prev.map(e => e.id === id ? { ...e, isDeleted: true } : e));
     if (readingEmail?.id === id) setReadingEmail(null);
   };
 
@@ -134,7 +176,7 @@ function App() {
     if (action === 'read') {
       setEmails(prev => prev.map(e => selectedIds.includes(e.id) ? { ...e, isRead: true } : e));
     } else {
-      setEmails(prev => prev.filter(e => !selectedIds.includes(e.id)));
+      setEmails(prev => prev.map(e => selectedIds.includes(e.id) ? { ...e, isDeleted: true } : e));
     }
     setSelectedIds([]);
   };
@@ -149,17 +191,23 @@ function App() {
       </div>
 
       <div className="sidebar">
-        <div className="sidebar-title"><Mail size={24} color="#60a5fa" /> Himalaya AI</div>
+        <div className="sidebar-title"><MountainSnow size={24} color="#60a5fa" /> Annapurna</div>
         
         <div className="sidebar-label">メイン</div>
         <div className={`sidebar-item ${activeFolder === 'inbox' ? 'active' : ''}`} onClick={() => {setActiveFolder('inbox'); setReadingEmail(null);}}>
           <Inbox size={18} /> 受信トレイ {counts.inboxCount > 0 && <span className="sidebar-unread-count">{counts.inboxCount}</span>}
         </div>
         
-        <div className="sidebar-label">AI Smart</div>
-        <div className={`sidebar-item ${activeFolder === 'urgent' ? 'active' : ''}`} onClick={() => {setActiveFolder('urgent'); setReadingEmail(null);}}><Zap size={18} color="#f59e0b" /> 至急対応 {counts.urgentCount > 0 && <span className="sidebar-unread-count">{counts.urgentCount}</span>}</div>
-        <div className={`sidebar-item ${activeFolder === 'schedule' ? 'active' : ''}`} onClick={() => {setActiveFolder('schedule'); setReadingEmail(null);}}><Calendar size={18} color="#10b981" /> スケジュール {counts.scheduleCount > 0 && <span className="sidebar-unread-count">{counts.scheduleCount}</span>}</div>
-        <div className={`sidebar-item ${activeFolder === 'finance' ? 'active' : ''}`} onClick={() => {setActiveFolder('finance'); setReadingEmail(null);}}><CreditCard size={18} color="#3b82f6" /> 経理・請求 {counts.financeCount > 0 && <span className="sidebar-unread-count">{counts.financeCount}</span>}</div>
+        <div className="sidebar-label">フォルダ</div>
+        <div className={`sidebar-item ${activeFolder === 'flagged' ? 'active' : ''}`} onClick={() => {setActiveFolder('flagged'); setReadingEmail(null);}}>
+          <Star size={18} color={activeFolder === 'flagged' ? "#eab308" : "currentColor"} /> 星付き {counts.flaggedCount > 0 && <span className="sidebar-unread-count">{counts.flaggedCount}</span>}
+        </div>
+        <div className={`sidebar-item ${activeFolder === 'drafts' ? 'active' : ''}`} onClick={() => {setActiveFolder('drafts'); setReadingEmail(null);}}>
+          <FileEdit size={18} /> 下書き {counts.draftCount > 0 && <span className="sidebar-unread-count">{counts.draftCount}</span>}
+        </div>
+        <div className={`sidebar-item ${activeFolder === 'trash' ? 'active' : ''}`} onClick={() => {setActiveFolder('trash'); setReadingEmail(null);}}>
+          <Trash2 size={18} /> ゴミ箱
+        </div>
         
         <div className="theme-toggle-container">
           <button className="theme-toggle-btn" onClick={() => setIsDarkMode(!isDarkMode)}>
@@ -177,10 +225,40 @@ function App() {
               </div>
               <div className="detail-body-scroll">
                 <div className="detail-header">
-                  <h2 className="detail-subject">{readingEmail.subject}</h2>
-                  <div className="detail-meta"><span>{readingEmail.from}</span><span>{readingEmail.date}</span></div>
+                  <h2 className="detail-subject">
+                    {readingEmail.isFlagged && <Star size={20} fill="#eab308" color="#eab308" style={{display: 'inline', marginRight: '8px', verticalAlign: 'text-bottom'}} />}
+                    {readingEmail.subject}
+                  </h2>
+                  <div className="detail-meta">
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {readingEmail.from}
+                      <button 
+                        onClick={() => {
+                          setSearchQuery(readingEmail.from);
+                          setReadingEmail(null);
+                        }}
+                        className="icon-button"
+                        style={{ width: '24px', height: '24px', padding: 0 }}
+                        title="この送信者のメールを検索"
+                      >
+                        <Search size={14} />
+                      </button>
+                    </span>
+                    <span>{readingEmail.date}</span>
+                  </div>
                 </div>
-                <div className="detail-body">{readingEmail.body}</div>
+                
+                <div className="detail-body">
+                  {isReadingContent ? (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px', color: '#9ca3af' }}>
+                      <RefreshCw size={24} className="spin" style={{ marginRight: '8px' }} />
+                      サーバーから本文を取得中...
+                    </div>
+                  ) : (
+                    <div style={{ whiteSpace: 'pre-wrap' }}>{readingEmail.body}</div>
+                  )}
+                </div>
+
                 <div className="inline-reply-editor">
                   <div className="reply-to-info"><CornerUpLeft size={16} /> {readingEmail.from} への返信</div>
                   <textarea className="reply-textarea" placeholder="返信内容を入力..." value={replyText} onChange={(e) => setReplyText(e.target.value)} />
@@ -191,7 +269,7 @@ function App() {
               </div>
             </div>
             <aside className="ai-summary-panel">
-              <div className="ai-panel-title"><Sparkles size={20} color="#8b5cf6" /> Himalaya AI</div>
+              <div className="ai-panel-title"><Sparkles size={20} color="#8b5cf6" /> Annapurna AI</div>
               {isAnalyzing ? (
                 <div className="ai-loading"><RefreshCw size={24} className="spin" color="#8b5cf6" /><span>解析中...</span></div>
               ) : (
@@ -218,7 +296,15 @@ function App() {
           </div>
         ) : (
           <>
-            <div className="header"><h2><Inbox size={24} /> {activeFolder === 'inbox' ? '受信トレイ' : 'スマートフォルダ'}</h2><button className="icon-button" onClick={fetchEmails} disabled={isRefreshing}><RefreshCw size={20} className={isRefreshing ? "spin" : ""} /></button></div>
+            <div className="header">
+              <h2>
+                {activeFolder === 'inbox' && <><Inbox size={24} /> 受信トレイ</>}
+                {activeFolder === 'flagged' && <><Star size={24} /> 星付き</>}
+                {activeFolder === 'drafts' && <><FileEdit size={24} /> 下書き</>}
+                {activeFolder === 'trash' && <><Trash2 size={24} /> ゴミ箱</>}
+              </h2>
+              <button className="icon-button" onClick={fetchEmails} disabled={isRefreshing}><RefreshCw size={20} className={isRefreshing ? "spin" : ""} /></button>
+            </div>
             <div className="header-controls">
               {selectedIds.length > 0 ? (
                 <div className="action-bar"><span className="action-text">{selectedIds.length} 件選択</span><button className="icon-button" onClick={() => handleBulkAction('read')} title="既読"><CheckCircle size={20}/></button><button className="icon-button" onClick={() => handleBulkAction('delete')} title="削除"><Trash2 size={20}/></button><button className="icon-button" onClick={() => setSelectedIds([])} style={{marginLeft: 'auto'}}><X size={18}/></button></div>
@@ -227,21 +313,37 @@ function App() {
               )}
               {selectedIds.length === 0 && <div className="filter-group"><button className={`filter-button ${filterUnread ? 'active' : ''}`} onClick={() => setFilterUnread(!filterUnread)}>未読のみ</button></div>}
             </div>
+            
             <div className="list-header list-grid-layout">
               <div className="header-cell"><input type="checkbox" checked={filteredAndSortedEmails.length > 0 && selectedIds.length === filteredAndSortedEmails.length} onChange={(e) => setSelectedIds(e.target.checked ? filteredAndSortedEmails.map(m => m.id) : [])} /></div>
               <div className="header-cell" onClick={() => setSortConfig({ key: 'date', direction: sortConfig?.direction === 'asc' ? 'desc' : 'asc' })}>日時 {renderSortIcon('date')}</div>
               <div className="header-cell" onClick={() => setSortConfig({ key: 'subject', direction: sortConfig?.direction === 'asc' ? 'desc' : 'asc' })}>件名 {renderSortIcon('subject')}</div>
-              <div className="header-cell" onClick={() => setSortConfig({ key: 'aiCategories', direction: sortConfig?.direction === 'asc' ? 'desc' : 'asc' })}>分類 {renderSortIcon('aiCategories')}</div>
+              <div className="header-cell">ステータス</div>
               <div className="header-cell" onClick={() => setSortConfig({ key: 'from', direction: sortConfig?.direction === 'asc' ? 'desc' : 'asc' })}>送信元 {renderSortIcon('from')}</div>
               <div className="header-cell" style={{ justifyContent: 'center' }}>操作</div>
             </div>
+            
             <div className="email-list">
               {filteredAndSortedEmails.map((email) => (
                 <div key={email.id} className={`email-list-item list-grid-layout ${!email.isRead ? 'unread' : ''} ${selectedIds.includes(email.id) ? 'selected' : ''}`}>
                   <div className="cell-checkbox"><input type="checkbox" checked={selectedIds.includes(email.id)} onChange={(e) => setSelectedIds(prev => e.target.checked ? [...prev, email.id] : prev.filter(i => i !== email.id))} /></div>
                   <div className="cell-date">{email.date}</div>
-                  <div className="cell-subject">{!email.isRead && <span className="unread-dot"></span>}<span className="subject-text clickable-subject" onClick={() => setReadingEmail(email)}>{email.subject}</span></div>
-                  <div className="cell-category">{email.aiCategories.map((tag, idx) => (<span key={idx} className={getBadgeClass(tag)}><Sparkles size={12} /> {tag}</span>))}</div>
+                  <div className="cell-subject">
+                    {!email.isRead && <span className="unread-dot"></span>}
+                    <span className="subject-text clickable-subject" onClick={() => handleSelectEmail(email)}>
+                      {email.subject}
+                    </span>
+                  </div>
+                  
+                  <div className="cell-category" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <button onClick={(e) => toggleFlagStatus(email.id, e)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex' }}>
+                      <Star size={16} fill={email.isFlagged ? "#eab308" : "none"} color={email.isFlagged ? "#eab308" : "#9ca3af"} />
+                    </button>
+                    {email.isAnswered && <span title="返信済み" style={{ color: '#10b981', display: 'flex' }}><Reply size={16} /></span>}
+                    {email.isDraft && <span className="badge" style={{ backgroundColor: '#f3f4f6', color: '#4b5563' }}>下書き</span>}
+                    {email.isDeleted && <span className="badge badge-urgent">削除予定</span>}
+                  </div>
+                  
                   <div className="cell-from">{email.from}</div>
                   <div className="cell-actions-container">
                     <div className="item-attachment">{email.hasAttachment && <Paperclip size={18} />}</div>
