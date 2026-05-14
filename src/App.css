@@ -1,3 +1,4 @@
+/* --- 1. テーマ変数と基本設定 --- */
 :root {
   --bg-app: #f3f4f6;
   --bg-sidebar: #111827;
@@ -39,7 +40,7 @@ body {
 }
 .app-container { display: flex; height: 100vh; }
 
-/* 2. アカウントバー */
+/* --- 2. アカウントバー --- */
 .account-bar { 
   width: 60px; background-color: var(--bg-account-bar); display: flex; flex-direction: column; 
   align-items: center; padding: 16px 0; gap: 16px; border-right: 1px solid var(--border-color); flex-shrink: 0; 
@@ -54,7 +55,7 @@ body {
   border-radius: 50%; border: 2px solid var(--bg-account-bar); 
 }
 
-/* 3. サイドバー */
+/* --- 3. サイドバー --- */
 .sidebar { 
   width: 220px; background-color: var(--bg-sidebar); color: white; padding: 20px 12px; 
   display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; overflow-y: auto; 
@@ -68,7 +69,7 @@ body {
 .theme-toggle-container { margin-top: auto; padding: 12px 8px; border-top: 1px solid #1e293b; }
 .theme-toggle-btn { width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 6px; background: none; border: 1px solid #334155; color: #9ca3af; cursor: pointer; font-size: 0.85rem; }
 
-/* 4. メインコンテンツ & ヘッダー */
+/* --- 4. メインコンテンツ & ヘッダー --- */
 .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; background-color: var(--bg-main); }
 .header { padding: 16px 24px 8px 24px; display: flex; justify-content: space-between; align-items: center; }
 .header h2 { margin: 0; font-size: 1.3rem; color: var(--text-main); display: flex; align-items: center; gap: 8px; }
@@ -76,71 +77,199 @@ body {
 .search-container { position: relative; flex: 1; max-width: 360px; }
 .search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-muted); }
 .search-input { width: 100%; padding: 6px 12px 6px 34px; border: 1px solid var(--border-color); border-radius: 6px; background-color: var(--bg-main); color: var(--text-main); outline: none; font-size: 0.9rem; }
-.action-bar { flex: 1; display: flex; align-items: center; gap: 8px; background-color: rgba(37, 99, 235, 0.1); padding: 5px 12px; border-radius: 6px; font-size: 0.9rem; }
-.filter-button { display: flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-main); color: var(--text-muted); cursor: pointer; font-size: 0.85rem; }
 
-/* 5. メールリスト表示 */
+/* --- 5. 新設：スライドドロワー用レイアウト --- */
+.main-layout-container {
+  display: flex;
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.email-list-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  transition: margin-right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.side-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 420px; /* 少し広めに設定 */
+  height: 100%;
+  background-color: var(--bg-main);
+  border-left: 1px solid var(--border-color);
+  box-shadow: -10px 0 25px rgba(0, 0, 0, 0.05);
+  z-index: 50;
+  transform: translateX(100%);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+}
+
+.side-drawer.open {
+  transform: translateX(0);
+}
+
+.drawer-header {
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.drawer-content {
+  flex: 1;
+  padding: 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.insight-card {
+  background-color: rgba(139, 92, 246, 0.05);
+  border: 1px solid rgba(139, 92, 246, 0.1);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 24px;
+}
+
+/* --- 6. メールリスト表示（グリッド設計） --- */
 .list-grid-layout {
   display: grid;
   grid-template-columns: 36px 50px 140px 1fr 180px 60px 100px;
   align-items: center; padding: 0 24px;
 }
+
 .list-header { 
   background-color: var(--bg-list-header); border-bottom: 1px solid var(--border-color); 
-  font-size: 0.8rem; color: var(--text-muted); height: 38px; font-weight: 600; 
+  font-size: 0.8rem; color: var(--text-muted); height: 38px;
+  border-left: 4px solid transparent; 
 }
-/* ヘッダーの文字をセンター寄せにする */
-.list-header .header-cell {
-  display: flex; justify-content: center; align-items: center; width: 100%; height: 100%;
-}
-.email-list { flex: 1; overflow-y: auto; }
-.email-list-item { height: 52px; border-bottom: 1px solid var(--border-color); cursor: pointer; transition: background-color 0.1s; position: relative; }
-.email-list-item:hover { background-color: var(--item-hover); }
 
-/* セル内スタイル */
+.header-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0 8px;
+  font-weight: 600;
+  height: 100%;
+}
+
+.list-grid-layout > .header-cell:nth-child(1),
+.list-grid-layout > .header-cell:nth-child(2),
+.list-grid-layout > .header-cell:nth-child(6),
+.list-grid-layout > .header-cell:last-child { 
+  justify-content: center;
+  padding-left: 0;
+}
+
+.email-list { flex: 1; overflow-y: auto; }
+
+.email-list-item { 
+  height: 52px; 
+  border-bottom: 1px solid var(--border-color); 
+  border-left: 4px solid transparent; 
+  cursor: pointer; 
+  transition: background-color 0.1s, border-left-color 0.1s; 
+  position: relative; 
+}
+
+.email-list-item.active {
+  background-color: var(--item-hover);
+  border-left-color: var(--unread-accent);
+}
+
+.email-list-item:hover { 
+  background-color: var(--item-hover); 
+}
+
+/* --- 7. アクションボタン & ホバー修正版 --- */
+.cell-actions-container { 
+  display: flex; 
+  justify-content: center; 
+  align-items: center; 
+  position: relative; 
+  height: 100%; 
+  width: 100%;
+}
+
+.item-attachment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.hover-actions { 
+  display: none; 
+  gap: 4px; 
+  background-color: var(--item-hover); 
+  padding: 0 4px; 
+  height: 100%; 
+  align-items: center; 
+  justify-content: center; 
+  position: absolute; 
+  top: 0; 
+  left: 0; 
+  right: 0; 
+  bottom: 0; 
+  z-index: 10;
+}
+
+.email-list-item:hover .hover-actions { display: flex; }
+.email-list-item:hover .item-attachment { visibility: hidden; }
+
+.hover-btn { 
+  padding: 4px; 
+  border-radius: 4px; 
+  color: var(--text-muted); 
+  background: none; 
+  border: none; 
+  cursor: pointer; 
+  display: flex; 
+  align-items: center; 
+  transition: 0.2s;
+}
+.hover-btn:hover { background-color: var(--border-color); color: var(--text-main); }
+
+/* --- 8. セル内スタイル --- */
 .cell-flag, .cell-reply { display: flex; justify-content: center; }
 .cell-reply { color: #10b981; }
-.cell-date { font-size: 0.85rem; color: var(--text-muted); }
-.cell-from { font-size: 0.9rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.2s; }
-.cell-subject { display: flex; align-items: center; gap: 10px; overflow: hidden; padding-right: 12px; }
+.cell-date { font-size: 0.85rem; color: var(--text-muted); padding: 0 8px; }
+.cell-from { font-size: 0.9rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 8px; }
+.cell-subject { display: flex; align-items: center; gap: 10px; overflow: hidden; padding: 0 12px 0 8px; }
 .subject-text { font-size: 0.95rem; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 400; }
 
-/* 未読強調 */
-.email-list-item.unread { background-color: rgba(37, 99, 235, 0.06); border-left: 4px solid var(--unread-accent); }
+.email-list-item.unread { 
+  background-color: rgba(37, 99, 235, 0.06); 
+  border-left-color: var(--unread-accent);
+}
 .email-list-item.unread .cell-from, .email-list-item.unread .subject-text { font-weight: 700; }
 .email-list-item.unread .cell-from { color: var(--text-main); }
 .unread-dot { width: 10px; height: 10px; background-color: var(--unread-accent); border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 6px rgba(37, 99, 235, 0.4); }
 
-/* 6. アクションボタン & ホバー */
-.cell-actions-container { display: flex; justify-content: center; position: relative; height: 100%; align-items: center; }
-.hover-actions { position: absolute; display: none; gap: 2px; background-color: var(--item-hover); padding-left: 8px; height: 100%; align-items: center; right: 24px; }
-.email-list-item:hover .hover-actions { display: flex; }
-.hover-btn { padding: 4px; border-radius: 4px; color: var(--text-muted); background: none; border: none; cursor: pointer; }
-.hover-btn:hover { background-color: var(--border-color); color: var(--text-main); }
-
-/* 7. メール詳細画面 */
+/* --- 9. メール詳細画面 --- */
 .email-detail-split { display: flex; flex: 1; overflow: hidden; }
 .email-detail-container { flex: 1; display: flex; flex-direction: column; overflow-y: auto; background-color: var(--bg-main); border-right: 1px solid var(--border-color); }
 .detail-header { padding: 24px 30px 16px 30px; border-bottom: 1px solid var(--border-color); }
 .detail-subject { font-size: 1.4rem; font-weight: bold; color: var(--text-main); margin: 0 0 12px 0; line-height: 1.3; }
 .detail-meta { display: flex; justify-content: space-between; color: var(--text-muted); font-size: 0.9rem; }
 .detail-body { padding: 24px 30px; font-size: 0.95rem; color: var(--text-main); line-height: 1.6; white-space: pre-wrap; }
+
 .inline-reply-editor { margin: 0 30px 30px 30px; border: 1px solid var(--border-color); border-radius: 12px; background-color: var(--bg-main); display: flex; flex-direction: column; }
 .reply-to-info { padding: 12px 16px; font-size: 0.85rem; color: var(--text-muted); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 8px; }
 .reply-textarea { width: 100%; min-height: 150px; padding: 16px; border: none; resize: vertical; background-color: transparent; color: var(--text-main); font-family: inherit; font-size: 0.95rem; outline: none; }
 .send-btn { background-color: #2563eb; color: white; border: none; padding: 8px 20px; border-radius: 6px; font-weight: 600; display: flex; align-items: center; gap: 8px; cursor: pointer; }
 
-/* 8. AI パネル */
-.ai-summary-panel { width: 340px; background-color: var(--ai-panel-bg); padding: 20px; overflow-y: auto; flex-shrink: 0; }
-.ai-panel-title { display: flex; align-items: center; gap: 8px; font-size: 1rem; font-weight: 700; color: var(--text-main); margin-bottom: 16px; }
+/* --- 10. AI パネル共通 --- */
 .ai-section { background: var(--ai-section-bg); border: 1px solid var(--border-color); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
 .ai-section-title { font-size: 0.65rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 6px; }
-.ai-summary-text { font-size: 0.9rem; color: var(--text-main); line-height: 1.6; }
-.ai-draft-options { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-.draft-suggest-btn { padding: 8px 12px; background-color: var(--bg-app); border: 1px solid var(--border-color); border-radius: 8px; font-size: 0.85rem; font-weight: 600; color: var(--text-muted); cursor: pointer; transition: 0.2s; }
-.ai-draft-result { margin-top: 16px; padding: 16px; background-color: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 12px; }
 
-/* 9. 共通パーツ */
+/* --- 11. 共通パーツ --- */
 .badge { font-size: 0.65rem; padding: 2px 6px; border-radius: 10px; font-weight: 600; display: inline-flex; align-items: center; gap: 3px; }
 .badge-urgent { background-color: #fee2e2; color: #991b1b; }
 .badge-update { background-color: #e0e7ff; color: #3730a3; }
