@@ -5,9 +5,20 @@ use email::envelope::list::{ListEnvelopes, ListEnvelopesOptions};
 use email::envelope::{Id, SingleId};
 use email::imap::ImapContextBuilder;
 use email::message::get::GetMessages;
+use email::search_query::SearchEmailsQuery;
+use email::search_query::filter::SearchEmailsFilterQuery;
+use email::search_query::sort::{SearchEmailsSorter, SearchEmailsSorterKind, SearchEmailsSorterOrder};
+
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmailListResponse {
+    emails: Vec<EmailEnvelope>,
+    total_count: usize,
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,7 +40,6 @@ struct AppAccount {
     imap: email::imap::config::ImapConfig,
 }
 
-// 設定取得の共通関数（これがないと "Cannot find function" エラーになります）
 async fn get_config_and_imap() -> Result<(Arc<Config>, String, email::imap::config::ImapConfig), String> {
     let config_path = env::var("HIMALAYA_CONFIG")
         .map(PathBuf::from)
@@ -57,7 +67,7 @@ async fn get_config_and_imap() -> Result<(Arc<Config>, String, email::imap::conf
 }
 
 #[tauri::command]
-async fn get_emails() -> Result<Vec<EmailEnvelope>, String> {
+async fn get_emails(page: usize, page_size: usize) -> Result<EmailListResponse, String> {
     let (config, account_name, imap_config) = get_config_and_imap().await?;
     let account_config = Arc::new(config.account(&account_name).unwrap().clone());
 
@@ -68,8 +78,8 @@ async fn get_emails() -> Result<Vec<EmailEnvelope>, String> {
         .map_err(|e| format!("バックエンドの接続失敗: {}", e))?;
 
     let opts = ListEnvelopesOptions {
-        page_size: 100,
-        page: 0,
+        page_size,
+        page,
         query: None,
     };
 
@@ -78,7 +88,9 @@ async fn get_emails() -> Result<Vec<EmailEnvelope>, String> {
         .await
         .map_err(|e| format!("メールの取得失敗: {}", e))?;
 
-    let list = envelopes
+    let total_count = envelopes.len();
+
+    let emails = envelopes
         .into_iter()
         .map(|e| EmailEnvelope {
             id: e.id.to_string(),
@@ -88,7 +100,7 @@ async fn get_emails() -> Result<Vec<EmailEnvelope>, String> {
         })
         .collect();
 
-    Ok(list)
+    Ok(EmailListResponse { emails, total_count })
 }
 
 #[tauri::command]
@@ -96,18 +108,15 @@ async fn get_email_content(id: String) -> Result<String, String> {
     let (config, account_name, imap_config) = get_config_and_imap().await?;
     let account_config = Arc::new(config.account(&account_name).unwrap().clone());
 
-    // ここを修正しました！
     let ctx_builder = ImapContextBuilder::new(Arc::clone(&account_config), Arc::new(imap_config));
     let backend = BackendBuilder::new(Arc::clone(&account_config), ctx_builder)
         .build()
         .await
         .map_err(|e| format!("バックエンドの接続失敗: {}", e))?;
 
-    // IDの組み立て
     let single_id = SingleId::from(id);
     let id_enum = Id::Single(single_id);
 
-    // メッセージの取得
     let messages = backend
         .get_messages("INBOX", &id_enum)
         .await
@@ -119,7 +128,6 @@ async fn get_email_content(id: String) -> Result<String, String> {
 
     let parsed = email.parsed().map_err(|e| format!("パースエラー: {}", e))?;
 
-    // 型の不一致を避けるため、if let で確実に取り出して String に変換します
     let content = if let Some(html) = parsed.body_html(0) {
         html.to_string()
     } else if let Some(text) = parsed.body_text(0) {
@@ -129,6 +137,53 @@ async fn get_email_content(id: String) -> Result<String, String> {
     };
 
     Ok(content)
+}
+
+#[tauri::command]
+async fn search_emails_on_server(address: String, page: usize, page_size: usize) -> Result<EmailListResponse, String> {
+    let (config, account_name, imap_config) = get_config_and_imap().await?;
+    let account_config = Arc::new(config.account(&account_name).unwrap().clone());
+
+    let ctx_builder = ImapContextBuilder::new(Arc::clone(&account_config), Arc::new(imap_config));
+    let backend = BackendBuilder::new(Arc::clone(&account_config), ctx_builder)
+        .build()
+        .await
+        .map_err(|e| format!("バックエンドの接続失敗: {}", e))?;
+
+    let query = SearchEmailsQuery {
+        filter: Some(SearchEmailsFilterQuery::From(address)),
+        sort: Some(vec![
+            SearchEmailsSorter::new(
+                SearchEmailsSorterKind::Date,
+                SearchEmailsSorterOrder::Descending,
+            ),
+        ]),
+    };
+
+    let opts = ListEnvelopesOptions {
+        page_size,
+        page,
+        query: Some(query),
+    };
+
+    let envelopes = backend
+        .list_envelopes("INBOX", opts)
+        .await
+        .map_err(|e| format!("サーバー検索の実行失敗: {}", e))?;
+
+    let total_count = envelopes.len();
+
+    let emails = envelopes
+        .into_iter()
+        .map(|e| EmailEnvelope {
+            id: e.id.to_string(),
+            subject: e.subject.clone(),
+            from: e.from.to_string(),
+            date: e.date.to_string(),
+        })
+        .collect();
+
+    Ok(EmailListResponse { emails, total_count })
 }
 
 #[tauri::command]
@@ -153,6 +208,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_emails,
             get_email_content,
+            search_emails_on_server,
             send_email
         ])
         .run(tauri::generate_context!())
