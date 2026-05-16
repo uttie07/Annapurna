@@ -317,7 +317,7 @@ body {
   white-space: nowrap;
 }
 
-/* --- 5. スライドドロワー用レイアウト --- */
+/* --- 5. 新設：スライドドロワー用レイアウト --- */
 .main-layout-container {
   display: flex;
   flex: 1;
@@ -867,7 +867,6 @@ body {
   justify-content: center;
   background-color: var(--bg-main);
   animation: fadeIn 0.3s ease-in;
-  /* 親要素の高さを継承して中央に配置するための修正箇所 */
   height: 100%;
 }
 

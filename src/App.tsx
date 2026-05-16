@@ -39,9 +39,12 @@ function App() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [previewEmail, setPreviewEmail] = useState<Email | null>(null);
 
+  // サーバー検索中の状態管理
   const [isSearchingServer, setIsSearchingServer] = useState(false);
+
+  // ページネーションの状態管理（方針A：totalCountを廃止し、hasMoreを追加）
   const [currentPage, setCurrentPage] = useState(0);
-  const [totalCount, setTotalCount] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
   const PAGE_SIZE = 50;
 
   useEffect(() => {
@@ -103,8 +106,8 @@ function App() {
           };
         });
         setEmails(realEmails);
-        setTotalCount(response.totalCount);
         setCurrentPage(targetPage);
+        setHasMore(realEmails.length === PAGE_SIZE);
       } catch (e) {
         console.error("Fetch error:", e);
       } finally {
@@ -117,8 +120,8 @@ function App() {
           { id: "2", account: "work", subject: "Re: 今週のプロジェクト進捗ミーティング", from: "プロジェクトリーダー", email_address: "leader@example.com", date: formatEmailDate("2026-05-12T14:30:00"), snippet: "", body: "", aiCategories: ["会議"], hasAttachment: false, isRead: true, isFlagged: false, isAnswered: true, isDraft: false, isDeleted: false },
         ];
         setEmails(mockData.filter(m => m.account === activeAccount));
-        setTotalCount(mockData.length);
         setCurrentPage(targetPage);
+        setHasMore(false);
         setIsRefreshing(false);
       }, 500);
     }
@@ -185,8 +188,8 @@ function App() {
         });
 
         setEmails(searchResults);
-        setTotalCount(response.totalCount);
         setCurrentPage(page);
+        setHasMore(searchResults.length === PAGE_SIZE);
         setSearchQuery(address);
         setReadingEmail(null);
       } catch (e) {
@@ -217,9 +220,6 @@ function App() {
     return {
       workHasUnread: emails.some(e => e.account === 'work' && !e.isRead),
       personalHasUnread: emails.some(e => e.account === 'personal' && !e.isRead),
-      inboxCount: accEmails.filter(e => !e.isRead && !e.isDeleted && !e.isDraft).length,
-      urgentCount: accEmails.filter(e => e.aiCategories.includes("重要") || e.aiCategories.includes("至急")).length,
-      flaggedCount: accEmails.filter(e => e.isFlagged && !e.isDeleted).length,
     };
   }, [emails, activeAccount]);
 
@@ -232,7 +232,6 @@ function App() {
 
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
-      // 検索にメールアドレスの条件を復元
       result = result.filter(e =>
           e.subject.toLowerCase().includes(q) ||
           e.from.toLowerCase().includes(q) ||
@@ -248,6 +247,13 @@ function App() {
     }
     return result;
   }, [emails, activeAccount, activeFolder, searchQuery, filterUnread, sortConfig]);
+
+  // 画面右下の件数（現在表示されている件数の上限）を算出するロジック
+  const currentDisplayCount = useMemo(() => {
+    return filteredAndSortedEmails.length > 0
+        ? currentPage * PAGE_SIZE + filteredAndSortedEmails.length
+        : 0;
+  }, [currentPage, filteredAndSortedEmails.length]);
 
   const renderSortIcon = (k: keyof Email) => {
     if (sortConfig?.key !== k) return <ChevronDown size={14} color="#ccc" />;
@@ -286,16 +292,16 @@ function App() {
           <div className="sidebar-title"><MountainSnow size={24} color="#60a5fa" /> Annapurna</div>
           <div className="sidebar-label">メイン</div>
           <div className={`sidebar-item ${activeFolder === 'inbox' ? 'active' : ''}`} onClick={() => { setActiveFolder('inbox'); setReadingEmail(null); setIsDrawerOpen(false); }}>
-            <Inbox size={18} /> 受信トレイ {counts.inboxCount > 0 && <span className="sidebar-unread-count">{counts.inboxCount}</span>}
+            <Inbox size={18} /> 受信トレイ {activeFolder === 'inbox' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}
           </div>
           <div className="sidebar-label">AI Smart</div>
-          <div className={`sidebar-item ${activeFolder === 'urgent' ? 'active' : ''}`} onClick={() => { setActiveFolder('urgent'); setReadingEmail(null); setIsDrawerOpen(false); }}><Zap size={18} color="#f59e0b" /> 至急対応 {counts.urgentCount > 0 && <span className="sidebar-unread-count">{counts.urgentCount}</span>}</div>
+          <div className={`sidebar-item ${activeFolder === 'urgent' ? 'active' : ''}`} onClick={() => { setActiveFolder('urgent'); setReadingEmail(null); setIsDrawerOpen(false); }}><Zap size={18} color="#f59e0b" /> 至急対応 {activeFolder === 'urgent' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}</div>
           <div className="sidebar-label">フォルダ</div>
           <div className={`sidebar-item ${activeFolder === 'flagged' ? 'active' : ''}`} onClick={() => { setActiveFolder('flagged'); setReadingEmail(null); setIsDrawerOpen(false); }}>
-            <Star size={18} color={activeFolder === 'flagged' ? "#eab308" : "currentColor"} /> 星付き {counts.flaggedCount > 0 && <span className="sidebar-unread-count">{counts.flaggedCount}</span>}
+            <Star size={18} color={activeFolder === 'flagged' ? "#eab308" : "currentColor"} /> 星付き {activeFolder === 'flagged' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}
           </div>
           <div className={`sidebar-item ${activeFolder === 'drafts' ? 'active' : ''}`} onClick={() => { setActiveFolder('drafts'); setReadingEmail(null); setIsDrawerOpen(false); }}>
-            <FileEdit size={18} /> 下書き
+            <FileEdit size={18} /> 下書き {activeFolder === 'drafts' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}
           </div>
           <div className="theme-toggle-container">
             <button className="theme-toggle-btn" onClick={() => setIsDarkMode(!isDarkMode)}>
@@ -338,7 +344,6 @@ function App() {
                           <div className="detail-meta">
                             <div className="sender-info">
                               <span className="sender-name">{readingEmail.from}</span>
-                              {/* メールアドレスの表示を復元 */}
                               <span className="sender-address">{`<${readingEmail.email_address}>`}</span>
                               <button
                                   className={`inline-search-btn ${isSearchingServer ? 'loading' : ''}`}
@@ -476,7 +481,6 @@ function App() {
                           </div>
                           <div className="cell-date">{email.date}</div>
 
-                          {/* 件名とAIインサイトの復元 */}
                           <div className="cell-subject">
                             {!email.isRead && <span className="unread-dot"></span>}
                             <span className="subject-text">{email.subject}</span>
@@ -495,7 +499,6 @@ function App() {
                           <div className="cell-from">{email.from}</div>
                           <div className="cell-reply" title="返信済み">{email.isAnswered && <Reply size={16} />}</div>
 
-                          {/* ホバーアクションの復元 */}
                           <div className="cell-actions-container">
                             <div className="item-attachment">{email.hasAttachment && <Paperclip size={18} />}</div>
                             <div className="hover-actions" onClick={(e) => e.stopPropagation()}>
@@ -508,10 +511,11 @@ function App() {
                     {filteredAndSortedEmails.length === 0 && <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>メールが見つかりません</div>}
                   </div>
 
-                  {/* ページネーションバー */}
                   <div className="pagination-bar">
                     <div className="total-count-info">
-                      全 {totalCount} 件中 {totalCount > 0 ? currentPage * PAGE_SIZE + 1 : 0} - {Math.min((currentPage + 1) * PAGE_SIZE, totalCount)} 件表示
+                      {filteredAndSortedEmails.length > 0
+                          ? `${currentPage * PAGE_SIZE + 1} - ${currentDisplayCount} 件表示`
+                          : "0 件表示"}
                     </div>
                     <div className="pager-controls">
                       <button
@@ -524,7 +528,7 @@ function App() {
                       <span className="page-number">{currentPage + 1}</span>
                       <button
                           className="pager-btn"
-                          disabled={(currentPage + 1) * PAGE_SIZE >= totalCount || isRefreshing}
+                          disabled={!hasMore || isRefreshing}
                           onClick={() => fetchEmails(currentPage + 1)}
                       >
                         次へ
