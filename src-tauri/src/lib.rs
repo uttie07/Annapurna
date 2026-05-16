@@ -52,14 +52,16 @@ struct AppConfig {
     accounts: std::collections::HashMap<String, AppAccount>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Clone)]
 struct AppAccount {
     email: String,
     imap: email::imap::config::ImapConfig,
     smtp: Option<email::smtp::config::SmtpConfig>,
 }
 
-async fn get_full_config() -> Result<(Arc<Config>, String, email::imap::config::ImapConfig, Option<email::smtp::config::SmtpConfig>), String> {
+// 💡 新機能: config.toml にあるアカウント名の一覧をフロントエンドに返す
+#[tauri::command]
+async fn get_accounts() -> Result<Vec<String>, String> {
     let config_path = env::var("HIMALAYA_CONFIG")
         .map(PathBuf::from)
         .ok()
@@ -72,8 +74,27 @@ async fn get_full_config() -> Result<(Arc<Config>, String, email::imap::config::
     let app_config: AppConfig = toml::from_str(&toml_content)
         .map_err(|e| format!("TOMLの解析に失敗しました: {}", e))?;
 
-    let (account_name, app_account) = app_config.accounts.into_iter().next()
-        .ok_or("アカウントが設定されていません")?;
+    let mut names: Vec<String> = app_config.accounts.keys().cloned().collect();
+    names.sort(); // アルファベット順にソート
+    Ok(names)
+}
+
+// 💡 修正: 指定されたアカウント名(target_account)の設定を動的にビルドする
+async fn get_config_for_account(target_account: &str) -> Result<(Arc<Config>, String, email::imap::config::ImapConfig, Option<email::smtp::config::SmtpConfig>), String> {
+    let config_path = env::var("HIMALAYA_CONFIG")
+        .map(PathBuf::from)
+        .ok()
+        .or_else(|| dirs::config_dir().map(|p| p.join("himalaya/config.toml")))
+        .ok_or_else(|| "設定ファイルが見つかりません".to_string())?;
+
+    let toml_content = std::fs::read_to_string(&config_path)
+        .map_err(|e| format!("設定ファイルの読み込みに失敗: {}", e))?;
+
+    let app_config: AppConfig = toml::from_str(&toml_content)
+        .map_err(|e| format!("TOMLの解析に失敗しました: {}", e))?;
+
+    let app_account = app_config.accounts.get(target_account)
+        .ok_or_else(|| format!("アカウント '{}' が見つかりません", target_account))?;
 
     let safe_toml = format!(
         r#"
@@ -86,18 +107,18 @@ trash = "[Gmail]/ゴミ箱"
 sent = "[Gmail]/送信済みメール"
 drafts = "[Gmail]/下書き"
 "#,
-        account_name, account_name, app_account.email, account_name
+        target_account, target_account, app_account.email, target_account
     );
 
     let strict_config: Config = toml::from_str(&safe_toml)
         .map_err(|e| format!("内部設定の生成エラー: {}", e))?;
 
-    Ok((Arc::new(strict_config), account_name, app_account.imap, app_account.smtp))
+    Ok((Arc::new(strict_config), target_account.to_string(), app_account.imap.clone(), app_account.smtp.clone()))
 }
 
 #[tauri::command]
-async fn get_emails(folder: Option<String>, page: usize, page_size: usize) -> Result<EmailListResponse, String> {
-    let (config, account_name, imap_config, _) = get_full_config().await?;
+async fn get_emails(account: String, folder: Option<String>, page: usize, page_size: usize) -> Result<EmailListResponse, String> {
+    let (config, account_name, imap_config, _) = get_config_for_account(&account).await?;
     let account_config = Arc::new(config.account(&account_name).unwrap().clone());
 
     let ctx_builder = ImapContextBuilder::new(Arc::clone(&account_config), Arc::new(imap_config));
@@ -137,8 +158,8 @@ async fn get_emails(folder: Option<String>, page: usize, page_size: usize) -> Re
 }
 
 #[tauri::command]
-async fn get_email_content(folder: Option<String>, id: String) -> Result<EmailDetailResponse, String> {
-    let (config, account_name, imap_config, _) = get_full_config().await?;
+async fn get_email_content(account: String, folder: Option<String>, id: String) -> Result<EmailDetailResponse, String> {
+    let (config, account_name, imap_config, _) = get_config_for_account(&account).await?;
     let account_config = Arc::new(config.account(&account_name).unwrap().clone());
 
     let ctx_builder = ImapContextBuilder::new(Arc::clone(&account_config), Arc::new(imap_config));
@@ -182,8 +203,8 @@ async fn get_email_content(folder: Option<String>, id: String) -> Result<EmailDe
 }
 
 #[tauri::command]
-async fn search_emails_on_server(folder: Option<String>, address: String, page: usize, page_size: usize) -> Result<EmailListResponse, String> {
-    let (config, account_name, imap_config, _) = get_full_config().await?;
+async fn search_emails_on_server(account: String, folder: Option<String>, address: String, page: usize, page_size: usize) -> Result<EmailListResponse, String> {
+    let (config, account_name, imap_config, _) = get_config_for_account(&account).await?;
     let account_config = Arc::new(config.account(&account_name).unwrap().clone());
 
     let ctx_builder = ImapContextBuilder::new(Arc::clone(&account_config), Arc::new(imap_config));
@@ -233,8 +254,8 @@ async fn search_emails_on_server(folder: Option<String>, address: String, page: 
 }
 
 #[tauri::command]
-async fn add_email_flags(folder: Option<String>, ids: Vec<String>, flags: Vec<String>) -> Result<(), String> {
-    let (config, account_name, imap_config, _) = get_full_config().await?;
+async fn add_email_flags(account: String, folder: Option<String>, ids: Vec<String>, flags: Vec<String>) -> Result<(), String> {
+    let (config, account_name, imap_config, _) = get_config_for_account(&account).await?;
     let account_config = Arc::new(config.account(&account_name).unwrap().clone());
     let ctx_builder = ImapContextBuilder::new(Arc::clone(&account_config), Arc::new(imap_config));
     let backend = BackendBuilder::new(Arc::clone(&account_config), ctx_builder)
@@ -261,8 +282,8 @@ async fn add_email_flags(folder: Option<String>, ids: Vec<String>, flags: Vec<St
 }
 
 #[tauri::command]
-async fn remove_email_flags(folder: Option<String>, ids: Vec<String>, flags: Vec<String>) -> Result<(), String> {
-    let (config, account_name, imap_config, _) = get_full_config().await?;
+async fn remove_email_flags(account: String, folder: Option<String>, ids: Vec<String>, flags: Vec<String>) -> Result<(), String> {
+    let (config, account_name, imap_config, _) = get_config_for_account(&account).await?;
     let account_config = Arc::new(config.account(&account_name).unwrap().clone());
     let ctx_builder = ImapContextBuilder::new(Arc::clone(&account_config), Arc::new(imap_config));
     let backend = BackendBuilder::new(Arc::clone(&account_config), ctx_builder)
@@ -289,8 +310,8 @@ async fn remove_email_flags(folder: Option<String>, ids: Vec<String>, flags: Vec
 }
 
 #[tauri::command]
-async fn delete_emails(folder: Option<String>, ids: Vec<String>) -> Result<(), String> {
-    let (config, account_name, imap_config, _) = get_full_config().await?;
+async fn delete_emails(account: String, folder: Option<String>, ids: Vec<String>) -> Result<(), String> {
+    let (config, account_name, imap_config, _) = get_config_for_account(&account).await?;
     let account_config = Arc::new(config.account(&account_name).unwrap().clone());
     let ctx_builder = ImapContextBuilder::new(Arc::clone(&account_config), Arc::new(imap_config));
     let backend = BackendBuilder::new(Arc::clone(&account_config), ctx_builder)
@@ -308,10 +329,9 @@ async fn delete_emails(folder: Option<String>, ids: Vec<String>) -> Result<(), S
     Ok(())
 }
 
-// 💡 cc と bcc を受け取ってヘッダーに付与するように変更
 #[tauri::command]
-async fn send_email(to: String, cc: Option<String>, bcc: Option<String>, subject: String, body: String) -> Result<String, String> {
-    let (config, account_name, _, smtp_opt) = get_full_config().await?;
+async fn send_email(account: String, to: String, cc: Option<String>, bcc: Option<String>, subject: String, body: String) -> Result<String, String> {
+    let (config, account_name, _, smtp_opt) = get_config_for_account(&account).await?;
     let smtp_config = smtp_opt.ok_or_else(|| "SMTP設定が見つかりません。設定ファイルを確認してください。".to_string())?;
     let account_config = Arc::new(config.account(&account_name).unwrap().clone());
 
@@ -344,8 +364,8 @@ async fn send_email(to: String, cc: Option<String>, bcc: Option<String>, subject
 }
 
 #[tauri::command]
-async fn download_attachment(folder: Option<String>, id: String, filename: String) -> Result<Vec<u8>, String> {
-    let (config, account_name, imap_config, _) = get_full_config().await?;
+async fn download_attachment(account: String, folder: Option<String>, id: String, filename: String) -> Result<Vec<u8>, String> {
+    let (config, account_name, imap_config, _) = get_config_for_account(&account).await?;
     let account_config = Arc::new(config.account(&account_name).unwrap().clone());
     let ctx_builder = ImapContextBuilder::new(Arc::clone(&account_config), Arc::new(imap_config));
     let backend = BackendBuilder::new(Arc::clone(&account_config), ctx_builder)
@@ -377,10 +397,9 @@ async fn download_attachment(folder: Option<String>, id: String, filename: Strin
     Err("添付ファイルが見つかりません".to_string())
 }
 
-// 💡 save_draft も cc と bcc を保存できるように変更
 #[tauri::command]
-async fn save_draft(to: String, cc: Option<String>, bcc: Option<String>, subject: String, body: String) -> Result<String, String> {
-    let (config, account_name, imap_config, _) = get_full_config().await?;
+async fn save_draft(account: String, to: String, cc: Option<String>, bcc: Option<String>, subject: String, body: String) -> Result<String, String> {
+    let (config, account_name, imap_config, _) = get_config_for_account(&account).await?;
     let account_config = Arc::new(config.account(&account_name).unwrap().clone());
     let ctx_builder = ImapContextBuilder::new(Arc::clone(&account_config), Arc::new(imap_config));
     let backend = BackendBuilder::new(Arc::clone(&account_config), ctx_builder)
@@ -427,6 +446,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_accounts, // 💡 追加
             get_emails,
             get_email_content,
             search_emails_on_server,

@@ -39,7 +39,10 @@ function App() {
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [readingEmail, setReadingEmail] = useState<Email | null>(null);
   const [isReadingContent, setIsReadingContent] = useState<boolean>(false);
-  const [activeAccount, setActiveAccount] = useState<string>('work');
+
+  const [accounts, setAccounts] = useState<string[]>([]);
+  const [activeAccount, setActiveAccount] = useState<string>('');
+
   const [activeFolder, setActiveFolder] = useState<string>('inbox');
   const [isDarkMode, setIsDarkMode] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
 
@@ -88,6 +91,27 @@ function App() {
     else document.documentElement.classList.remove('dark');
   }, [isDarkMode]);
 
+  useEffect(() => {
+    const loadConfigAccounts = async () => {
+      const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
+      if (isTauri) {
+        try {
+          const loadedAccounts = await invoke('get_accounts') as string[];
+          setAccounts(loadedAccounts);
+          if (loadedAccounts.length > 0) {
+            setActiveAccount(loadedAccounts[0]);
+          }
+        } catch (e) {
+          console.error("Failed to load accounts:", e);
+        }
+      } else {
+        setAccounts(['work', 'personal']);
+        setActiveAccount('work');
+      }
+    };
+    loadConfigAccounts();
+  }, []);
+
   const saveApiKey = (key: string) => {
     setGeminiApiKey(key);
     localStorage.setItem('geminiApiKey', key);
@@ -126,6 +150,7 @@ function App() {
   };
 
   const fetchEmails = async (page: number = 0) => {
+    if (!activeAccount) return;
     const targetPage = Math.max(0, page);
     setIsRefreshing(true);
     const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
@@ -134,7 +159,7 @@ function App() {
 
     if (isTauri) {
       try {
-        const response = await invoke('get_emails', { folder: serverFolder, page: targetPage, pageSize: PAGE_SIZE }) as { emails: any[], totalCount: number };
+        const response = await invoke('get_emails', { account: activeAccount, folder: serverFolder, page: targetPage, pageSize: PAGE_SIZE }) as { emails: any[], totalCount: number };
 
         const realEmails: Email[] = response.emails.map((e) => {
           const flags: string[] = e.flags || [];
@@ -245,7 +270,7 @@ ${plainText}`;
     if (isTauri) {
       setIsAnalyzingInsight(true);
       try {
-        const contentResponse = await invoke<EmailDetailResponse>('get_email_content', { folder: getServerFolder(), id: email.id });
+        const contentResponse = await invoke<EmailDetailResponse>('get_email_content', { account: activeAccount, folder: getServerFolder(), id: email.id });
         await analyzeEmailWithGemini(email, contentResponse.body);
       } catch (e) {
         setIsAnalyzingInsight(false);
@@ -319,7 +344,7 @@ ${plainText}`;
       if (isTauri) {
         try {
           const serverFolder = getServerFolder();
-          const contentResponse = await invoke<EmailDetailResponse>('get_email_content', { folder: serverFolder, id: email.id });
+          const contentResponse = await invoke<EmailDetailResponse>('get_email_content', { account: activeAccount, folder: serverFolder, id: email.id });
 
           let rawBody = contentResponse.body;
           if (rawBody.includes('<html') || rawBody.includes('<div')) {
@@ -356,7 +381,7 @@ ${plainText}`;
     if (isTauri) {
       try {
         const serverFolder = getServerFolder();
-        const contentResponse = await invoke<EmailDetailResponse>('get_email_content', { folder: serverFolder, id: email.id });
+        const contentResponse = await invoke<EmailDetailResponse>('get_email_content', { account: activeAccount, folder: serverFolder, id: email.id });
 
         let formattedBody = contentResponse.body;
         if (!/<[a-z][\s\S]*>/i.test(formattedBody)) {
@@ -367,7 +392,7 @@ ${plainText}`;
 
         if (!email.isRead) {
           setEmails(prev => prev.map(e => e.id === email.id ? { ...e, isRead: true } : e));
-          invoke('add_email_flags', { folder: serverFolder, ids: [email.id], flags: ["Seen"] }).catch(err => console.error("Failed to mark as read:", err));
+          invoke('add_email_flags', { account: activeAccount, folder: serverFolder, ids: [email.id], flags: ["Seen"] }).catch(err => console.error("Failed to mark as read:", err));
         }
       } catch (e) {
         console.error("Content fetch error:", e);
@@ -389,6 +414,7 @@ ${plainText}`;
     try {
       const serverFolder = getServerFolder();
       const bytes = await invoke<number[]>('download_attachment', {
+        account: activeAccount,
         folder: serverFolder,
         id: readingEmail.id,
         filename
@@ -442,6 +468,7 @@ ${plainText}`;
           : `Re: ${readingEmail.subject}`;
 
       await invoke('send_email', {
+        account: activeAccount,
         to: readingEmail.email_address,
         cc: replyCc || null,
         bcc: replyBcc || null,
@@ -475,6 +502,7 @@ ${plainText}`;
 
     try {
       await invoke('send_email', {
+        account: activeAccount,
         to: composeTo,
         cc: composeCc || null,
         bcc: composeBcc || null,
@@ -483,7 +511,7 @@ ${plainText}`;
       });
 
       if (composingDraftId) {
-        await invoke('delete_emails', { folder: 'drafts', ids: [composingDraftId] });
+        await invoke('delete_emails', { account: activeAccount, folder: 'drafts', ids: [composingDraftId] });
       }
 
       setIsComposeSending(false);
@@ -515,6 +543,7 @@ ${plainText}`;
         setIsComposeSending(true);
         try {
           await invoke('save_draft', {
+            account: activeAccount,
             to: composeTo,
             cc: composeCc || null,
             bcc: composeBcc || null,
@@ -523,7 +552,7 @@ ${plainText}`;
           });
 
           if (composingDraftId) {
-            await invoke('delete_emails', { folder: 'drafts', ids: [composingDraftId] });
+            await invoke('delete_emails', { account: activeAccount, folder: 'drafts', ids: [composingDraftId] });
           }
 
           setSuccessMessage("下書きを保存しました");
@@ -552,7 +581,7 @@ ${plainText}`;
     if (isTauri) {
       try {
         const serverFolder = getServerFolder();
-        const response = await invoke('search_emails_on_server', { folder: serverFolder, address, page, pageSize: PAGE_SIZE }) as { emails: any[], totalCount: number };
+        const response = await invoke('search_emails_on_server', { account: activeAccount, folder: serverFolder, address, page, pageSize: PAGE_SIZE }) as { emails: any[], totalCount: number };
         const searchResults: Email[] = response.emails.map((e) => {
           const flags: string[] = e.flags || [];
           return {
@@ -595,12 +624,11 @@ ${plainText}`;
   };
 
   const counts = useMemo(() => {
-    const accEmails = emails.filter(e => e.account === activeAccount);
     return {
-      workHasUnread: emails.some(e => e.account === 'work' && !e.isRead),
-      personalHasUnread: emails.some(e => e.account === 'personal' && !e.isRead),
+      workHasUnread: emails.some(e => e.account.toLowerCase().includes('work') && !e.isRead),
+      personalHasUnread: emails.some(e => e.account.toLowerCase().includes('personal') && !e.isRead),
     };
-  }, [emails, activeAccount]);
+  }, [emails]);
 
   const filteredAndSortedEmails = useMemo(() => {
     let result = emails.filter(e => e.account === activeAccount);
@@ -650,9 +678,9 @@ ${plainText}`;
       try {
         const serverFolder = getServerFolder();
         if (isCurrentlyRead) {
-          await invoke('remove_email_flags', { folder: serverFolder, ids: [id], flags: ["Seen"] });
+          await invoke('remove_email_flags', { account: activeAccount, folder: serverFolder, ids: [id], flags: ["Seen"] });
         } else {
-          await invoke('add_email_flags', { folder: serverFolder, ids: [id], flags: ["Seen"] });
+          await invoke('add_email_flags', { account: activeAccount, folder: serverFolder, ids: [id], flags: ["Seen"] });
         }
       } catch (err) {
         console.error("Flag update failed", err);
@@ -673,9 +701,9 @@ ${plainText}`;
       try {
         const serverFolder = getServerFolder();
         if (isCurrentlyFlagged) {
-          await invoke('remove_email_flags', { folder: serverFolder, ids: [id], flags: ["Flagged"] });
+          await invoke('remove_email_flags', { account: activeAccount, folder: serverFolder, ids: [id], flags: ["Flagged"] });
         } else {
-          await invoke('add_email_flags', { folder: serverFolder, ids: [id], flags: ["Flagged"] });
+          await invoke('add_email_flags', { account: activeAccount, folder: serverFolder, ids: [id], flags: ["Flagged"] });
         }
       } catch (err) {
         console.error("Flag update failed", err);
@@ -691,7 +719,7 @@ ${plainText}`;
 
     if (!USE_MOCK) {
       try {
-        await invoke('delete_emails', { folder: getServerFolder(), ids: [id] });
+        await invoke('delete_emails', { account: activeAccount, folder: getServerFolder(), ids: [id] });
       } catch (err) {
         console.error("Delete failed", err);
         setEmails(prev => prev.map(em => em.id === id ? { ...em, isDeleted: false } : em));
@@ -708,7 +736,7 @@ ${plainText}`;
       setSelectedIds([]);
       if (!USE_MOCK) {
         try {
-          await invoke('add_email_flags', { folder: getServerFolder(), ids: idsToUpdate, flags: ["Seen"] });
+          await invoke('add_email_flags', { account: activeAccount, folder: getServerFolder(), ids: idsToUpdate, flags: ["Seen"] });
         } catch(e) { console.error("Bulk read failed", e); }
       }
     } else {
@@ -716,7 +744,7 @@ ${plainText}`;
       setSelectedIds([]);
       if (!USE_MOCK) {
         try {
-          await invoke('delete_emails', { folder: getServerFolder(), ids: idsToUpdate });
+          await invoke('delete_emails', { account: activeAccount, folder: getServerFolder(), ids: idsToUpdate });
         } catch(e) { console.error("Bulk delete failed", e); }
       }
     }
@@ -725,10 +753,30 @@ ${plainText}`;
   return (
       <div className={`app-container ${isDarkMode ? 'dark' : ''}`}>
         <div className="account-bar">
-          <div className={`account-icon ${activeAccount === 'work' ? 'active' : ''}`} onClick={() => { setActiveAccount('work'); setReadingEmail(null); setIsDrawerOpen(false); }}>W{counts.workHasUnread && <div className="account-dot"></div>}</div>
-          <div className={`account-icon ${activeAccount === 'personal' ? 'active' : ''}`} onClick={() => { setActiveAccount('personal'); setReadingEmail(null); setIsDrawerOpen(false); }}>P{counts.personalHasUnread && <div className="account-dot"></div>}</div>
+          {accounts.map((accName) => {
+            const isSelected = activeAccount === accName;
+            const displayChar = accName.charAt(0).toUpperCase();
+            return (
+                <div
+                    key={accName}
+                    className={`account-icon ${isSelected ? 'active' : ''}`}
+                    onClick={() => { setActiveAccount(accName); setReadingEmail(null); setIsDrawerOpen(false); }}
+                    title={accName}
+                >
+                  {displayChar}
+                </div>
+            );
+          })}
           <div style={{ width: '32px', height: '2px', backgroundColor: '#1f2937', margin: '4px 0' }}></div>
-          <div className="account-icon" style={{ border: '1px dashed #4b5563', backgroundColor: 'transparent' }}><Plus size={20} /></div>
+          {/* 💡 修正: クリック時にアラートを出すように変更 */}
+          <div
+              className="account-icon"
+              style={{ border: '1px dashed #4b5563', backgroundColor: 'transparent', cursor: 'pointer' }}
+              onClick={() => alert("アカウントの追加機能は現在開発中です。\n設定ファイル (himalaya/config.toml) を直接編集してアカウントを追加してください。")}
+              title="アカウントを追加"
+          >
+            <Plus size={20} />
+          </div>
         </div>
 
         <div className="sidebar">
@@ -981,7 +1029,6 @@ ${plainText}`;
                                     </div>
                                 )}
 
-                                {/* 💡 AIドラフトボタン（常時表示に変更） */}
                                 <div style={{ padding: '8px 12px', display: 'flex', gap: '8px', overflowX: 'auto', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)' }}>
                           <span style={{ display: 'flex', alignItems: 'center', fontSize: '0.8rem', color: '#8b5cf6', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
                             <Bot size={14} style={{ marginRight: '4px' }} /> AIドラフト:
