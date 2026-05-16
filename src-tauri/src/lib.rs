@@ -16,15 +16,11 @@ use email::message::delete::DeleteMessages;
 
 use email::smtp::SmtpContextBuilder;
 use email::message::send::SendMessage;
-
-// 💡 サーバーにメッセージを追加（保存）するためのトレイト
 use email::message::add::AddMessage;
 
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
-
-// ⚠️ ここにあった不要な use email::message::parser::MimeHeaders; を削除しました！
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -312,8 +308,9 @@ async fn delete_emails(folder: Option<String>, ids: Vec<String>) -> Result<(), S
     Ok(())
 }
 
+// 💡 cc と bcc を受け取ってヘッダーに付与するように変更
 #[tauri::command]
-async fn send_email(to: String, subject: String, body: String) -> Result<String, String> {
+async fn send_email(to: String, cc: Option<String>, bcc: Option<String>, subject: String, body: String) -> Result<String, String> {
     let (config, account_name, _, smtp_opt) = get_full_config().await?;
     let smtp_config = smtp_opt.ok_or_else(|| "SMTP設定が見つかりません。設定ファイルを確認してください。".to_string())?;
     let account_config = Arc::new(config.account(&account_name).unwrap().clone());
@@ -326,9 +323,17 @@ async fn send_email(to: String, subject: String, body: String) -> Result<String,
 
     let from = &account_config.email;
 
+    let mut headers = format!("From: {}\r\nTo: {}", from, to);
+    if let Some(c) = cc.filter(|s| !s.is_empty()) {
+        headers.push_str(&format!("\r\nCc: {}", c));
+    }
+    if let Some(b) = bcc.filter(|s| !s.is_empty()) {
+        headers.push_str(&format!("\r\nBcc: {}", b));
+    }
+
     let raw_msg = format!(
-        "From: {}\r\nTo: {}\r\nSubject: {}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{}",
-        from, to, subject, body
+        "{}\r\nSubject: {}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{}",
+        headers, subject, body
     );
 
     log::info!("送信リクエストを開始: 宛先={}, 件名={}", to, subject);
@@ -372,8 +377,9 @@ async fn download_attachment(folder: Option<String>, id: String, filename: Strin
     Err("添付ファイルが見つかりません".to_string())
 }
 
+// 💡 save_draft も cc と bcc を保存できるように変更
 #[tauri::command]
-async fn save_draft(to: String, subject: String, body: String) -> Result<String, String> {
+async fn save_draft(to: String, cc: Option<String>, bcc: Option<String>, subject: String, body: String) -> Result<String, String> {
     let (config, account_name, imap_config, _) = get_full_config().await?;
     let account_config = Arc::new(config.account(&account_name).unwrap().clone());
     let ctx_builder = ImapContextBuilder::new(Arc::clone(&account_config), Arc::new(imap_config));
@@ -383,9 +389,18 @@ async fn save_draft(to: String, subject: String, body: String) -> Result<String,
         .map_err(|e| format!("バックエンドの接続失敗: {}", e))?;
 
     let from = &account_config.email;
+
+    let mut headers = format!("From: {}\r\nTo: {}", from, to);
+    if let Some(c) = cc.filter(|s| !s.is_empty()) {
+        headers.push_str(&format!("\r\nCc: {}", c));
+    }
+    if let Some(b) = bcc.filter(|s| !s.is_empty()) {
+        headers.push_str(&format!("\r\nBcc: {}", b));
+    }
+
     let raw_msg = format!(
-        "From: {}\r\nTo: {}\r\nSubject: {}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{}",
-        from, to, subject, body
+        "{}\r\nSubject: {}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{}",
+        headers, subject, body
     );
 
     let target_folder = "drafts".to_string();

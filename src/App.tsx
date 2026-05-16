@@ -5,7 +5,7 @@ import {
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
   RefreshCw, ArrowLeft, Plus, Search,
   CheckCircle, Trash2, X, Eye, Zap, MessageSquare, Calendar, CreditCard,
-  Sun, Moon, CornerUpLeft, Send, Star, Reply, FileEdit
+  Sun, Moon, CornerUpLeft, Send, Star, Reply, FileEdit, ReplyAll, Users
 } from 'lucide-react';
 import './App.css';
 
@@ -38,18 +38,26 @@ function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiDraft, setAiDraft] = useState<string | null>(null);
   const [isDrafting, setIsDrafting] = useState(false);
-  const [replyText, setReplyText] = useState('');
+
   const [searchQuery, setSearchQuery] = useState('');
   const [filterUnread, setFilterUnread] = useState(false);
 
-  // 下書き用の状態
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [composeTo, setComposeTo] = useState('');
+  const [composeCc, setComposeCc] = useState('');
+  const [composeBcc, setComposeBcc] = useState('');
+  const [showComposeCcBcc, setShowComposeCcBcc] = useState(false);
   const [composeSubject, setComposeSubject] = useState('');
   const [composeBody, setComposeBody] = useState('');
   const [isComposeSending, setIsComposeSending] = useState(false);
   const [composingDraftId, setComposingDraftId] = useState<string | null>(null);
   const [isLoadingDraft, setIsLoadingDraft] = useState(false);
+
+  const [replyText, setReplyText] = useState('');
+  const [replyType, setReplyType] = useState<'reply' | 'replyAll'>('reply');
+  const [replyCc, setReplyCc] = useState('');
+  const [replyBcc, setReplyBcc] = useState('');
+  const [showReplyCcBcc, setShowReplyCcBcc] = useState(false);
 
   const [isSending, setIsSending] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -58,7 +66,6 @@ function App() {
 
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [previewEmail, setPreviewEmail] = useState<Email | null>(null);
-
   const [isSearchingServer, setIsSearchingServer] = useState(false);
 
   const [currentPage, setCurrentPage] = useState(0);
@@ -168,6 +175,9 @@ function App() {
     if (activeFolder === 'drafts') {
       setIsComposeOpen(true);
       setComposeTo(email.to || email.from || '');
+      setComposeCc('');
+      setComposeBcc('');
+      setShowComposeCcBcc(false);
       setComposeSubject(email.subject === '(件名なし)' ? '' : email.subject);
       setComposeBody('');
       setComposingDraftId(email.id);
@@ -209,7 +219,14 @@ function App() {
       try {
         const serverFolder = getServerFolder();
         const contentResponse = await invoke<EmailDetailResponse>('get_email_content', { folder: serverFolder, id: email.id });
-        setReadingEmail(prev => prev ? { ...prev, body: contentResponse.body, attachmentsList: contentResponse.attachments } : null);
+
+        let formattedBody = contentResponse.body;
+        // 💡 追加: プレーンテキスト（HTMLタグが含まれない）の場合は、見やすいフォントと改行を適用
+        if (!/<[a-z][\s\S]*>/i.test(formattedBody)) {
+          formattedBody = `<div style="white-space: pre-wrap; font-family: sans-serif; font-size: 14px; padding: 16px; color: #333;">${formattedBody}</div>`;
+        }
+
+        setReadingEmail(prev => prev ? { ...prev, body: formattedBody, attachmentsList: contentResponse.attachments } : null);
 
         if (!email.isRead) {
           setEmails(prev => prev.map(e => e.id === email.id ? { ...e, isRead: true } : e));
@@ -251,12 +268,32 @@ function App() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-
     } catch (e) {
       console.error(e);
       alert(`ダウンロードに失敗しました: ${e}`);
     } finally {
       setIsDownloading(false);
+    }
+  };
+
+  // 💡 修正: 「返信」「全員に返信」ボタンを押したタイミングで引用文を挿入する
+  const handleSetReplyType = (type: 'reply' | 'replyAll') => {
+    setReplyType(type);
+
+    // まだテキストが入力されていない（空の）場合のみ、引用文を生成して挿入
+    if (!replyText.trim() && readingEmail) {
+      const tempDiv = document.createElement("div");
+      tempDiv.innerHTML = readingEmail.body;
+      const plainText = tempDiv.innerText || tempDiv.textContent || "";
+      const quote = `\n\n\n--- 引用 ---\n${readingEmail.date} ${readingEmail.from} wrote:\n> ${plainText.split(/\r?\n/).join('\n> ')}`;
+      setReplyText(quote);
+    }
+
+    if (type === 'replyAll' && readingEmail?.to) {
+      setReplyCc(readingEmail.to);
+      setShowReplyCcBcc(true);
+    } else {
+      setReplyCc('');
     }
   };
 
@@ -271,6 +308,8 @@ function App() {
 
       await invoke('send_email', {
         to: readingEmail.email_address,
+        cc: replyCc || null,
+        bcc: replyBcc || null,
         subject: subject,
         body: replyText
       });
@@ -301,6 +340,8 @@ function App() {
     try {
       await invoke('send_email', {
         to: composeTo,
+        cc: composeCc || null,
+        bcc: composeBcc || null,
         subject: composeSubject || '(件名なし)',
         body: composeBody
       });
@@ -316,6 +357,9 @@ function App() {
       setTimeout(() => {
         setSuccessMessage(null);
         setComposeTo('');
+        setComposeCc('');
+        setComposeBcc('');
+        setShowComposeCcBcc(false);
         setComposeSubject('');
         setComposeBody('');
         setComposingDraftId(null);
@@ -334,7 +378,13 @@ function App() {
       if (window.confirm("書きかけのメールを下書きに保存しますか？")) {
         setIsComposeSending(true);
         try {
-          await invoke('save_draft', { to: composeTo, subject: composeSubject, body: composeBody });
+          await invoke('save_draft', {
+            to: composeTo,
+            cc: composeCc || null,
+            bcc: composeBcc || null,
+            subject: composeSubject,
+            body: composeBody
+          });
 
           if (composingDraftId) {
             await invoke('delete_emails', { folder: 'drafts', ids: [composingDraftId] });
@@ -351,6 +401,9 @@ function App() {
     }
     setIsComposeOpen(false);
     setComposeTo('');
+    setComposeCc('');
+    setComposeBcc('');
+    setShowComposeCcBcc(false);
     setComposeSubject('');
     setComposeBody('');
     setComposingDraftId(null);
@@ -405,9 +458,16 @@ function App() {
     }
   };
 
+  // 💡 修正: 詳細画面を開いた直後はフォームを完全に空にする
   useEffect(() => {
     if (readingEmail && !isReadingContent) {
-      setIsAnalyzing(true); setAiDraft(null); setReplyText('');
+      setIsAnalyzing(true); setAiDraft(null);
+      setReplyText(''); // 意図的に空白にしておく
+      setReplyCc('');
+      setReplyBcc('');
+      setShowReplyCcBcc(false);
+      setReplyType('reply');
+
       const timer = setTimeout(() => setIsAnalyzing(false), 800);
       return () => clearTimeout(timer);
     }
@@ -425,7 +485,6 @@ function App() {
     let result = emails.filter(e => e.account === activeAccount);
     if (activeFolder === 'urgent') result = result.filter(e => e.aiCategories.includes("重要") || e.aiCategories.includes("至急"));
     else if (activeFolder === 'flagged') result = result.filter(e => e.isFlagged && !e.isDeleted);
-    // 💡 修正箇所: ここで「isDraftフラグが付いているものだけ」という条件を外し、「削除されていなければ表示」に変更しています
     else if (activeFolder === 'drafts') result = result.filter(e => !e.isDeleted);
     if (filterUnread) result = result.filter(e => !e.isRead);
 
@@ -689,16 +748,52 @@ function App() {
 
                         <div style={{ flexShrink: 0, padding: '12px 32px 16px 32px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-header)' }}>
                           <div className="inline-reply-editor" style={{ margin: 0, backgroundColor: 'var(--bg-main)', border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden' }}>
-                            <div className="reply-to-info" style={{ borderBottom: '1px solid var(--border-color)', padding: '6px 12px' }}>
-                              <CornerUpLeft size={14} style={{ marginRight: '6px' }} /> {readingEmail.from} への返信
+
+                            {/* 💡 修正: ここをクリックしたタイミングで引用文が挿入されます */}
+                            <div className="reply-to-info" style={{ borderBottom: '1px solid var(--border-color)', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div style={{ display: 'flex', gap: '16px' }}>
+                                <button
+                                    onClick={() => handleSetReplyType('reply')}
+                                    style={{ display: 'flex', alignItems: 'center', fontWeight: replyType === 'reply' ? 'bold' : 'normal', color: replyType === 'reply' ? 'var(--text-main)' : 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                                >
+                                  <CornerUpLeft size={14} style={{ marginRight: '4px' }} /> 返信
+                                </button>
+                                <button
+                                    onClick={() => handleSetReplyType('replyAll')}
+                                    style={{ display: 'flex', alignItems: 'center', fontWeight: replyType === 'replyAll' ? 'bold' : 'normal', color: replyType === 'replyAll' ? 'var(--text-main)' : 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                                    title="元の宛先(To)全員を含める"
+                                >
+                                  <ReplyAll size={14} style={{ marginRight: '4px' }} /> 全員に返信
+                                </button>
+                              </div>
+                              <button
+                                  onClick={() => setShowReplyCcBcc(!showReplyCcBcc)}
+                                  style={{ fontSize: '0.8rem', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}
+                              >
+                                {showReplyCcBcc ? 'Cc/Bccを隠す' : 'Cc/Bccを追加'}
+                              </button>
                             </div>
+
+                            {showReplyCcBcc && (
+                                <div style={{ display: 'flex', flexDirection: 'column', borderBottom: '1px solid var(--border-color)', padding: '6px 12px', gap: '6px', backgroundColor: 'var(--bg-header)' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', width: '30px' }}>Cc:</span>
+                                    <input type="text" value={replyCc} onChange={e => setReplyCc(e.target.value)} disabled={isSending} style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: '0.85rem', color: 'var(--text-main)' }} placeholder="追加の宛先..." />
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', width: '30px' }}>Bcc:</span>
+                                    <input type="text" value={replyBcc} onChange={e => setReplyBcc(e.target.value)} disabled={isSending} style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: '0.85rem', color: 'var(--text-main)' }} placeholder="追加の宛先..." />
+                                  </div>
+                                </div>
+                            )}
+
                             <textarea
                                 className="reply-textarea"
                                 placeholder="返信内容を入力..."
                                 value={replyText}
                                 onChange={(e) => setReplyText(e.target.value)}
                                 disabled={isSending}
-                                style={{ minHeight: '60px', border: 'none', backgroundColor: 'transparent' }}
+                                style={{ minHeight: '120px', border: 'none', backgroundColor: 'transparent' }}
                             />
                             <div className="reply-toolbar" style={{ padding: '8px 12px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-header)' }}>
                               <button className="send-btn" onClick={handleSendReply} disabled={isSending || !replyText.trim()} style={{ height: '32px', fontSize: '0.85rem' }}>
@@ -933,6 +1028,9 @@ function App() {
                   onClick={() => {
                     setIsComposeOpen(true);
                     setComposeTo('');
+                    setComposeCc('');
+                    setComposeBcc('');
+                    setShowComposeCcBcc(false);
                     setComposeSubject('');
                     setComposeBody('');
                     setComposingDraftId(null);
@@ -990,14 +1088,29 @@ function App() {
                         </div>
                     )}
 
-                    <input
-                        type="text"
-                        placeholder="宛先 (例: test@example.com)"
-                        value={composeTo}
-                        onChange={e => setComposeTo(e.target.value)}
-                        disabled={isComposeSending}
-                        style={{ width: '100%', padding: '10px 0', border: 'none', borderBottom: '1px solid var(--border-color)', backgroundColor: 'transparent', color: 'var(--text-main)', outline: 'none', fontSize: '0.95rem' }}
-                    />
+                    <div style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--border-color)' }}>
+                      <input
+                          type="text"
+                          placeholder="宛先 (例: test@example.com)"
+                          value={composeTo}
+                          onChange={e => setComposeTo(e.target.value)}
+                          disabled={isComposeSending}
+                          style={{ flex: 1, padding: '10px 0', border: 'none', backgroundColor: 'transparent', color: 'var(--text-main)', outline: 'none', fontSize: '0.95rem' }}
+                      />
+                      {!showComposeCcBcc && (
+                          <button onClick={() => setShowComposeCcBcc(true)} style={{ fontSize: '0.85rem', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>
+                            Cc/Bcc
+                          </button>
+                      )}
+                    </div>
+
+                    {showComposeCcBcc && (
+                        <>
+                          <input type="text" placeholder="Cc" value={composeCc} onChange={e => setComposeCc(e.target.value)} disabled={isComposeSending} style={{ width: '100%', padding: '10px 0', border: 'none', borderBottom: '1px solid var(--border-color)', backgroundColor: 'transparent', color: 'var(--text-main)', outline: 'none', fontSize: '0.95rem' }} />
+                          <input type="text" placeholder="Bcc" value={composeBcc} onChange={e => setComposeBcc(e.target.value)} disabled={isComposeSending} style={{ width: '100%', padding: '10px 0', border: 'none', borderBottom: '1px solid var(--border-color)', backgroundColor: 'transparent', color: 'var(--text-main)', outline: 'none', fontSize: '0.95rem' }} />
+                        </>
+                    )}
+
                     <input
                         type="text"
                         placeholder="件名"
