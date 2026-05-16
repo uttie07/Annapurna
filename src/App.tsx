@@ -11,7 +11,7 @@ import './App.css';
 const USE_MOCK = false;
 
 type Email = {
-  id: string; subject: string; from: string; email_address: string; date: string; snippet: string;
+  id: string; subject: string; from: string; to?: string; email_address: string; date: string; snippet: string;
   body: string; aiCategories: string[]; account: string; hasAttachment: boolean;
   isRead: boolean; isFlagged: boolean; isAnswered: boolean; isDraft: boolean; isDeleted: boolean;
 };
@@ -35,6 +35,10 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterUnread, setFilterUnread] = useState(false);
 
+  const [isSending, setIsSending] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [previewEmail, setPreviewEmail] = useState<Email | null>(null);
 
@@ -48,6 +52,13 @@ function App() {
     if (isDarkMode) document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
   }, [isDarkMode]);
+
+  // 💡 共通化: 現在のUI上のフォルダからサーバー用のフォルダ名を取得するヘルパー
+  const getServerFolder = () => {
+    if (activeFolder === "sent") return "sent";
+    if (activeFolder === "drafts") return "drafts";
+    return "INBOX";
+  };
 
   const formatEmailDate = (dateStr: string) => {
     if (!dateStr) return '';
@@ -64,7 +75,7 @@ function App() {
   };
 
   const formatSenderName = (fromStr: string) => {
-    if (!fromStr) return '不明な送信元';
+    if (!fromStr) return '不明な宛先/送信元';
     const match = fromStr.match(/^"?([^"<]+)"?\s*<.*>$/) || fromStr.match(/^([^<]+)/);
     return match && match[1] ? match[1].trim() : fromStr;
   };
@@ -79,15 +90,20 @@ function App() {
     const targetPage = Math.max(0, page);
     setIsRefreshing(true);
     const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
+
+    const serverFolder = getServerFolder();
+
     if (isTauri) {
       try {
-        const response = await invoke('get_emails', { page: targetPage, pageSize: PAGE_SIZE }) as { emails: any[], totalCount: number };
+        const response = await invoke('get_emails', { folder: serverFolder, page: targetPage, pageSize: PAGE_SIZE }) as { emails: any[], totalCount: number };
+
         const realEmails: Email[] = response.emails.map((e) => {
           const flags: string[] = e.flags || [];
           return {
             id: String(e.id),
             subject: e.subject || '(件名なし)',
             from: formatSenderName(e.from),
+            to: e.to ? formatSenderName(e.to) : undefined,
             email_address: extractEmailAddress(e.from),
             date: formatEmailDate(e.date),
             snippet: '',
@@ -102,6 +118,7 @@ function App() {
             account: activeAccount
           };
         });
+
         setEmails(realEmails);
         setCurrentPage(targetPage);
         setHasMore(realEmails.length === PAGE_SIZE);
@@ -114,7 +131,6 @@ function App() {
       setTimeout(() => {
         const mockData: Email[] = [
           { id: "1", account: "work", subject: "【重要】サーバーメンテナンスのお知らせ", from: "管理者", email_address: "admin@example.com", date: formatEmailDate("2026-05-13T10:00:00"), snippet: "", body: "", aiCategories: ["重要"], hasAttachment: true, isRead: false, isFlagged: true, isAnswered: false, isDraft: false, isDeleted: false },
-          { id: "2", account: "work", subject: "Re: 今週のプロジェクト進捗ミーティング", from: "プロジェクトリーダー", email_address: "leader@example.com", date: formatEmailDate("2026-05-12T14:30:00"), snippet: "", body: "", aiCategories: ["会議"], hasAttachment: false, isRead: true, isFlagged: false, isAnswered: true, isDraft: false, isDeleted: false },
         ];
         setEmails(mockData.filter(m => m.account === activeAccount));
         setCurrentPage(targetPage);
@@ -124,7 +140,7 @@ function App() {
     }
   };
 
-  useEffect(() => { fetchEmails(0); }, [activeAccount]);
+  useEffect(() => { fetchEmails(0); }, [activeAccount, activeFolder]);
 
   const handlePreviewEmail = (email: Email) => {
     setPreviewEmail(email);
@@ -139,12 +155,14 @@ function App() {
     const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
     if (isTauri) {
       try {
-        const content = await invoke<string>('get_email_content', { id: email.id });
+        const serverFolder = getServerFolder();
+        // 💡 本文取得時に対象フォルダを指定
+        const content = await invoke<string>('get_email_content', { folder: serverFolder, id: email.id });
         setReadingEmail(prev => prev ? { ...prev, body: content } : null);
 
         if (!email.isRead) {
           setEmails(prev => prev.map(e => e.id === email.id ? { ...e, isRead: true } : e));
-          invoke('add_email_flags', { ids: [email.id], flags: ["Seen"] }).catch(err => console.error("Failed to mark as read:", err));
+          invoke('add_email_flags', { folder: serverFolder, ids: [email.id], flags: ["Seen"] }).catch(err => console.error("Failed to mark as read:", err));
         }
       } catch (e) {
         console.error("Content fetch error:", e);
@@ -154,9 +172,43 @@ function App() {
       }
     } else {
       setTimeout(() => {
-        setReadingEmail(prev => prev ? { ...prev, body: "これはブラウザ用のダミー本文です。実機ではRust経由で取得されます。" } : null);
+        setReadingEmail(prev => prev ? { ...prev, body: "ダミー本文" } : null);
         setIsReadingContent(false);
       }, 800);
+    }
+  };
+
+  const handleSendReply = async () => {
+    if (!readingEmail || !replyText.trim()) return;
+    setIsSending(true);
+
+    try {
+      const subject = readingEmail.subject.startsWith('Re:')
+          ? readingEmail.subject
+          : `Re: ${readingEmail.subject}`;
+
+      await invoke('send_email', {
+        to: readingEmail.email_address,
+        subject: subject,
+        body: replyText
+      });
+
+      setIsSending(false);
+      setSuccessMessage("メールを送信しました！");
+
+      setTimeout(() => {
+        setSuccessMessage(null);
+        setReplyText('');
+        setReadingEmail(null);
+      }, 1500);
+
+    } catch (e) {
+      setIsSending(false);
+      setErrorMessage(`送信に失敗しました: ${e}`);
+
+      setTimeout(() => {
+        setErrorMessage(null);
+      }, 3000);
     }
   };
 
@@ -166,13 +218,15 @@ function App() {
 
     if (isTauri) {
       try {
-        const response = await invoke('search_emails_on_server', { address, page, pageSize: PAGE_SIZE }) as { emails: any[], totalCount: number };
+        const serverFolder = getServerFolder();
+        const response = await invoke('search_emails_on_server', { folder: serverFolder, address, page, pageSize: PAGE_SIZE }) as { emails: any[], totalCount: number };
         const searchResults: Email[] = response.emails.map((e) => {
           const flags: string[] = e.flags || [];
           return {
             id: String(e.id),
             subject: e.subject || '(件名なし)',
             from: formatSenderName(e.from),
+            to: e.to ? formatSenderName(e.to) : undefined,
             email_address: extractEmailAddress(e.from),
             date: formatEmailDate(e.date),
             snippet: '',
@@ -270,10 +324,12 @@ function App() {
 
     if (!USE_MOCK) {
       try {
+        const serverFolder = getServerFolder();
+        // 💡 操作時にも対象フォルダを指定
         if (isCurrentlyRead) {
-          await invoke('remove_email_flags', { ids: [id], flags: ["Seen"] });
+          await invoke('remove_email_flags', { folder: serverFolder, ids: [id], flags: ["Seen"] });
         } else {
-          await invoke('add_email_flags', { ids: [id], flags: ["Seen"] });
+          await invoke('add_email_flags', { folder: serverFolder, ids: [id], flags: ["Seen"] });
         }
       } catch (err) {
         console.error("Flag update failed", err);
@@ -292,10 +348,11 @@ function App() {
 
     if (!USE_MOCK) {
       try {
+        const serverFolder = getServerFolder();
         if (isCurrentlyFlagged) {
-          await invoke('remove_email_flags', { ids: [id], flags: ["Flagged"] });
+          await invoke('remove_email_flags', { folder: serverFolder, ids: [id], flags: ["Flagged"] });
         } else {
-          await invoke('add_email_flags', { ids: [id], flags: ["Flagged"] });
+          await invoke('add_email_flags', { folder: serverFolder, ids: [id], flags: ["Flagged"] });
         }
       } catch (err) {
         console.error("Flag update failed", err);
@@ -311,7 +368,7 @@ function App() {
 
     if (!USE_MOCK) {
       try {
-        await invoke('delete_emails', { ids: [id] });
+        await invoke('delete_emails', { folder: getServerFolder(), ids: [id] });
       } catch (err) {
         console.error("Delete failed", err);
         setEmails(prev => prev.map(em => em.id === id ? { ...em, isDeleted: false } : em));
@@ -328,7 +385,7 @@ function App() {
       setSelectedIds([]);
       if (!USE_MOCK) {
         try {
-          await invoke('add_email_flags', { ids: idsToUpdate, flags: ["Seen"] });
+          await invoke('add_email_flags', { folder: getServerFolder(), ids: idsToUpdate, flags: ["Seen"] });
         } catch(e) { console.error("Bulk read failed", e); }
       }
     } else {
@@ -336,7 +393,7 @@ function App() {
       setSelectedIds([]);
       if (!USE_MOCK) {
         try {
-          await invoke('delete_emails', { ids: idsToUpdate });
+          await invoke('delete_emails', { folder: getServerFolder(), ids: idsToUpdate });
         } catch(e) { console.error("Bulk delete failed", e); }
       }
     }
@@ -354,16 +411,21 @@ function App() {
         <div className="sidebar">
           <div className="sidebar-title"><MountainSnow size={24} color="#60a5fa" /> Annapurna</div>
           <div className="sidebar-label">メイン</div>
-          <div className={`sidebar-item ${activeFolder === 'inbox' ? 'active' : ''}`} onClick={() => { setActiveFolder('inbox'); setReadingEmail(null); setIsDrawerOpen(false); }}>
+          <div className={`sidebar-item ${activeFolder === 'inbox' ? 'active' : ''}`} onClick={() => { setActiveFolder('inbox'); setCurrentPage(0); setReadingEmail(null); setIsDrawerOpen(false); }}>
             <Inbox size={18} /> 受信トレイ {activeFolder === 'inbox' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}
           </div>
+          <div className={`sidebar-item ${activeFolder === 'sent' ? 'active' : ''}`} onClick={() => { setActiveFolder('sent'); setCurrentPage(0); setReadingEmail(null); setIsDrawerOpen(false); }}>
+            <Send size={18} /> 送信済み {activeFolder === 'sent' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}
+          </div>
+
           <div className="sidebar-label">AI Smart</div>
-          <div className={`sidebar-item ${activeFolder === 'urgent' ? 'active' : ''}`} onClick={() => { setActiveFolder('urgent'); setReadingEmail(null); setIsDrawerOpen(false); }}><Zap size={18} color="#f59e0b" /> 至急対応 {activeFolder === 'urgent' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}</div>
+          <div className={`sidebar-item ${activeFolder === 'urgent' ? 'active' : ''}`} onClick={() => { setActiveFolder('urgent'); setCurrentPage(0); setReadingEmail(null); setIsDrawerOpen(false); }}><Zap size={18} color="#f59e0b" /> 至急対応 {activeFolder === 'urgent' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}</div>
+
           <div className="sidebar-label">フォルダ</div>
-          <div className={`sidebar-item ${activeFolder === 'flagged' ? 'active' : ''}`} onClick={() => { setActiveFolder('flagged'); setReadingEmail(null); setIsDrawerOpen(false); }}>
+          <div className={`sidebar-item ${activeFolder === 'flagged' ? 'active' : ''}`} onClick={() => { setActiveFolder('flagged'); setCurrentPage(0); setReadingEmail(null); setIsDrawerOpen(false); }}>
             <Star size={18} color={activeFolder === 'flagged' ? "#eab308" : "currentColor"} /> 星付き {activeFolder === 'flagged' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}
           </div>
-          <div className={`sidebar-item ${activeFolder === 'drafts' ? 'active' : ''}`} onClick={() => { setActiveFolder('drafts'); setReadingEmail(null); setIsDrawerOpen(false); }}>
+          <div className={`sidebar-item ${activeFolder === 'drafts' ? 'active' : ''}`} onClick={() => { setActiveFolder('drafts'); setCurrentPage(0); setReadingEmail(null); setIsDrawerOpen(false); }}>
             <FileEdit size={18} /> 下書き {activeFolder === 'drafts' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}
           </div>
           <div className="theme-toggle-container">
@@ -398,56 +460,71 @@ function App() {
                         </div>
                       </div>
                   ) : (
-                      <div className="detail-body-scroll">
-                        <div className="detail-header">
-                          <h2 className="detail-subject">
-                            {readingEmail.isFlagged && <Star size={20} fill="#eab308" color="#eab308" style={{ display: 'inline', marginRight: '8px', verticalAlign: 'text-bottom' }} />}
-                            {readingEmail.subject}
-                          </h2>
-                          <div className="detail-meta">
-                            <div className="sender-info">
-                              <span className="sender-name">{readingEmail.from}</span>
-                              <span className="sender-address">{`<${readingEmail.email_address}>`}</span>
-                              <button
-                                  className={`inline-search-btn ${isSearchingServer ? 'loading' : ''}`}
-                                  onClick={() => handleServerSearch(readingEmail.email_address, 0)}
-                                  disabled={isSearchingServer}
-                                  title="サーバーからこのアドレスを検索"
-                              >
-                                <Search size={14} />
+                      <>
+                        <div className="detail-body-scroll" style={{ flex: 1, overflowY: 'auto' }}>
+                          <div className="detail-header">
+                            <h2 className="detail-subject">
+                              {readingEmail.isFlagged && <Star size={20} fill="#eab308" color="#eab308" style={{ display: 'inline', marginRight: '8px', verticalAlign: 'text-bottom' }} />}
+                              {readingEmail.subject}
+                            </h2>
+                            <div className="detail-meta">
+                              <div className="sender-info">
+                                <span className="sender-name">{readingEmail.from}</span>
+                                <span className="sender-address">{`<${readingEmail.email_address}>`}</span>
+                                <button
+                                    className={`inline-search-btn ${isSearchingServer ? 'loading' : ''}`}
+                                    onClick={() => handleServerSearch(readingEmail.email_address, 0)}
+                                    disabled={isSearchingServer}
+                                    title="サーバーからこのアドレスを検索"
+                                >
+                                  <Search size={14} />
+                                </button>
+                              </div>
+                              <span>{readingEmail.date}</span>
+                            </div>
+                          </div>
+                          <div className="detail-body" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+                            {isReadingContent ? (
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px', color: '#9ca3af' }}>
+                                  <RefreshCw size={24} className="spin" style={{ marginRight: '8px' }} /> 読み込み中...
+                                </div>
+                            ) : (
+                                <iframe
+                                    title="Email Content"
+                                    srcDoc={readingEmail.body}
+                                    style={{
+                                      width: '100%',
+                                      flexGrow: 1,
+                                      border: 'none',
+                                      backgroundColor: '#ffffff',
+                                      minHeight: '400px',
+                                    }}
+                                    sandbox="allow-same-origin allow-popups"
+                                />
+                            )}
+                          </div>
+                        </div>
+
+                        <div style={{ flexShrink: 0, padding: '16px 40px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-header)' }}>
+                          <div className="inline-reply-editor" style={{ margin: 0 }}>
+                            <div className="reply-to-info"><CornerUpLeft size={16} /> {readingEmail.from} への返信</div>
+                            <textarea
+                                className="reply-textarea"
+                                placeholder="返信内容を入力..."
+                                value={replyText}
+                                onChange={(e) => setReplyText(e.target.value)}
+                                disabled={isSending}
+                                style={{ minHeight: '80px' }}
+                            />
+                            <div className="reply-toolbar" style={{ padding: '12px 16px', display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border-color)' }}>
+                              <button className="send-btn" onClick={handleSendReply} disabled={isSending}>
+                                {isSending ? <RefreshCw size={16} className="spin" /> : <Send size={16} />}
+                                {isSending ? '送信中...' : '送信する'}
                               </button>
                             </div>
-                            <span>{readingEmail.date}</span>
                           </div>
                         </div>
-                        <div className="detail-body" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                          {isReadingContent ? (
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px', color: '#9ca3af' }}>
-                                <RefreshCw size={24} className="spin" style={{ marginRight: '8px' }} /> 読み込み中...
-                              </div>
-                          ) : (
-                              <iframe
-                                  title="Email Content"
-                                  srcDoc={readingEmail.body}
-                                  style={{
-                                    width: '100%',
-                                    flexGrow: 1,
-                                    border: 'none',
-                                    backgroundColor: '#ffffff',
-                                    minHeight: '600px',
-                                  }}
-                                  sandbox="allow-same-origin allow-popups"
-                              />
-                          )}
-                        </div>
-                        <div className="inline-reply-editor">
-                          <div className="reply-to-info"><CornerUpLeft size={16} /> {readingEmail.from} への返信</div>
-                          <textarea className="reply-textarea" placeholder="返信内容を入力..." value={replyText} onChange={(e) => setReplyText(e.target.value)} />
-                          <div className="reply-toolbar">
-                            <button className="send-btn" onClick={() => { alert("送信しました"); setReadingEmail(null); }}><Send size={16} /> 送信する</button>
-                          </div>
-                        </div>
-                      </div>
+                      </>
                   )}
                 </div>
               </div>
@@ -455,7 +532,20 @@ function App() {
               <div className="main-layout-container">
                 <div className="email-list-container">
                   <div className="header">
-                    <h2><Inbox size={24} /> {activeFolder === 'inbox' ? '受信トレイ' : 'フォルダ'}</h2>
+                    <h2>
+                      {activeFolder === 'inbox' && <Inbox size={24} />}
+                      {activeFolder === 'sent' && <Send size={24} />}
+                      {activeFolder === 'urgent' && <Zap size={24} color="#f59e0b" />}
+                      {activeFolder === 'flagged' && <Star size={24} />}
+                      {activeFolder === 'drafts' && <FileEdit size={24} />}
+                      <span style={{ marginLeft: '8px' }}>
+                    {activeFolder === 'inbox' && '受信トレイ'}
+                        {activeFolder === 'sent' && '送信済み'}
+                        {activeFolder === 'urgent' && '至急対応'}
+                        {activeFolder === 'flagged' && '星付き'}
+                        {activeFolder === 'drafts' && '下書き'}
+                  </span>
+                    </h2>
                     <button className="icon-button" onClick={() => fetchEmails(currentPage)} disabled={isRefreshing}>
                       <RefreshCw size={20} className={isRefreshing ? "spin" : ""} />
                     </button>
@@ -518,7 +608,9 @@ function App() {
                       日時 {renderSortIcon('date')}
                     </div>
                     <div className="header-cell">件名</div>
-                    <div className="header-cell">送信元</div>
+                    <div className="header-cell">
+                      {activeFolder === 'sent' || activeFolder === 'drafts' ? '送信先' : '送信元'}
+                    </div>
                     <div className="header-cell"></div>
                     <div className="header-cell" style={{ justifyContent: 'center' }}>操作</div>
                   </div>
@@ -534,7 +626,7 @@ function App() {
                             <input
                                 type="checkbox"
                                 checked={selectedIds.includes(email.id)}
-                                onChange={(e) => setSelectedIds(prev => e.target.checked ? [...prev, email.id] : prev.filter(i => i !== email.id))}
+                                onChange={(prev) => setSelectedIds(prev => prev.includes(email.id) ? prev.filter(i => i !== email.id) : [...prev, email.id])}
                             />
                           </div>
                           <div className="cell-flag" onClick={(e) => e.stopPropagation()}>
@@ -559,7 +651,12 @@ function App() {
                             </button>
                           </div>
 
-                          <div className="cell-from">{email.from}</div>
+                          <div className="cell-from">
+                            {activeFolder === 'sent' || activeFolder === 'drafts'
+                                ? (email.to || email.from)
+                                : email.from}
+                          </div>
+
                           <div className="cell-reply" title="返信済み">{email.isAnswered && <Reply size={16} />}</div>
 
                           <div className="cell-actions-container">
@@ -656,11 +753,29 @@ function App() {
               </div>
           )}
 
-          {isRefreshing && (
+          {(isRefreshing || isSending || successMessage || errorMessage) && (
               <div className="global-loading-overlay">
-                <div className="global-loading-content">
-                  <RefreshCw size={48} className="spin global-loading-spinner" />
-                  <div className="global-loading-text">読み込み中...</div>
+                <div
+                    className="global-loading-content"
+                    style={{
+                      borderColor: successMessage ? '#10b981' : (errorMessage ? '#ef4444' : 'var(--border-color)')
+                    }}
+                >
+                  {(isRefreshing || isSending) && <RefreshCw size={48} className="spin global-loading-spinner" />}
+                  {successMessage && <CheckCircle size={48} color="#10b981" style={{ marginBottom: '16px' }} />}
+                  {errorMessage && <X size={48} color="#ef4444" style={{ marginBottom: '16px' }} />}
+
+                  <div
+                      className="global-loading-text"
+                      style={{
+                        color: successMessage ? '#10b981' : (errorMessage ? '#ef4444' : 'var(--text-main)')
+                      }}
+                  >
+                    {isRefreshing && '読み込み中...'}
+                    {isSending && '送信中...'}
+                    {successMessage}
+                    {errorMessage}
+                  </div>
                 </div>
               </div>
           )}
