@@ -9,6 +9,11 @@ use email::search_query::SearchEmailsQuery;
 use email::search_query::filter::SearchEmailsFilterQuery;
 use email::search_query::sort::{SearchEmailsSorter, SearchEmailsSorterKind, SearchEmailsSorterOrder};
 
+use email::envelope::flag::add::AddFlags;
+use email::envelope::flag::remove::RemoveFlags;
+use email::flag::{Flag, Flags};
+use email::message::delete::DeleteMessages;
+
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -27,6 +32,7 @@ pub struct EmailEnvelope {
     subject: String,
     from: String,
     date: String,
+    flags: Vec<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -56,10 +62,22 @@ async fn get_config_and_imap() -> Result<(Arc<Config>, String, email::imap::conf
     let (account_name, app_account) = app_config.accounts.into_iter().next()
         .ok_or("アカウントが設定されていません")?;
 
+    // 修正箇所：TOMLの解析エラーを防ぐため、folder.aliases の正しい階層構造で出力します。
+    // 日本語版Gmailの特殊フォルダ名（[Gmail]/ゴミ箱 など）を正確にマッピングします。
     let safe_toml = format!(
-        "[accounts.{}]\nname = \"{}\"\nemail = \"{}\"",
-        account_name, account_name, app_account.email
+        r#"
+[accounts.{}]
+name = "{}"
+email = "{}"
+
+[accounts.{}.folder.aliases]
+trash = "[Gmail]/ゴミ箱"
+sent = "[Gmail]/送信済みメール"
+drafts = "[Gmail]/下書き"
+"#,
+        account_name, account_name, app_account.email, account_name
     );
+
     let strict_config: Config = toml::from_str(&safe_toml)
         .map_err(|e| format!("内部設定の生成エラー: {}", e))?;
 
@@ -97,6 +115,7 @@ async fn get_emails(page: usize, page_size: usize) -> Result<EmailListResponse, 
             subject: e.subject.clone(),
             from: e.from.to_string(),
             date: e.date.to_string(),
+            flags: e.flags.iter().map(|f| f.to_string()).collect(),
         })
         .collect();
 
@@ -180,10 +199,83 @@ async fn search_emails_on_server(address: String, page: usize, page_size: usize)
             subject: e.subject.clone(),
             from: e.from.to_string(),
             date: e.date.to_string(),
+            flags: e.flags.iter().map(|f| f.to_string()).collect(),
         })
         .collect();
 
     Ok(EmailListResponse { emails, total_count })
+}
+
+#[tauri::command]
+async fn add_email_flags(ids: Vec<String>, flags: Vec<String>) -> Result<(), String> {
+    let (config, account_name, imap_config) = get_config_and_imap().await?;
+    let account_config = Arc::new(config.account(&account_name).unwrap().clone());
+    let ctx_builder = ImapContextBuilder::new(Arc::clone(&account_config), Arc::new(imap_config));
+    let backend = BackendBuilder::new(Arc::clone(&account_config), ctx_builder)
+        .build()
+        .await
+        .map_err(|e| format!("バックエンドの接続失敗: {}", e))?;
+
+    let target_flags = Flags::from_iter(flags.into_iter().map(|f| match f.as_str() {
+        "Seen" => Flag::Seen,
+        "Flagged" => Flag::Flagged,
+        "Deleted" => Flag::Deleted,
+        "Answered" => Flag::Answered,
+        "Draft" => Flag::Draft,
+        _ => Flag::Custom(f),
+    }));
+
+    for id in ids {
+        let target_id = Id::Single(SingleId::from(id));
+        backend.add_flags("INBOX", &target_id, &target_flags).await.map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn remove_email_flags(ids: Vec<String>, flags: Vec<String>) -> Result<(), String> {
+    let (config, account_name, imap_config) = get_config_and_imap().await?;
+    let account_config = Arc::new(config.account(&account_name).unwrap().clone());
+    let ctx_builder = ImapContextBuilder::new(Arc::clone(&account_config), Arc::new(imap_config));
+    let backend = BackendBuilder::new(Arc::clone(&account_config), ctx_builder)
+        .build()
+        .await
+        .map_err(|e| format!("バックエンドの接続失敗: {}", e))?;
+
+    let target_flags = Flags::from_iter(flags.into_iter().map(|f| match f.as_str() {
+        "Seen" => Flag::Seen,
+        "Flagged" => Flag::Flagged,
+        "Deleted" => Flag::Deleted,
+        "Answered" => Flag::Answered,
+        "Draft" => Flag::Draft,
+        _ => Flag::Custom(f),
+    }));
+
+    for id in ids {
+        let target_id = Id::Single(SingleId::from(id));
+        backend.remove_flags("INBOX", &target_id, &target_flags).await.map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn delete_emails(ids: Vec<String>) -> Result<(), String> {
+    let (config, account_name, imap_config) = get_config_and_imap().await?;
+    let account_config = Arc::new(config.account(&account_name).unwrap().clone());
+    let ctx_builder = ImapContextBuilder::new(Arc::clone(&account_config), Arc::new(imap_config));
+    let backend = BackendBuilder::new(Arc::clone(&account_config), ctx_builder)
+        .build()
+        .await
+        .map_err(|e| format!("バックエンドの接続失敗: {}", e))?;
+
+    for id in ids {
+        let target_id = Id::Single(SingleId::from(id));
+        backend.delete_messages("INBOX", &target_id).await.map_err(|e| format!("削除失敗: {}", e))?;
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -209,6 +301,9 @@ pub fn run() {
             get_emails,
             get_email_content,
             search_emails_on_server,
+            add_email_flags,
+            remove_email_flags,
+            delete_emails,
             send_email
         ])
         .run(tauri::generate_context!())

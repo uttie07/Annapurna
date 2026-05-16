@@ -8,7 +8,6 @@ import {
 } from 'lucide-react';
 import './App.css';
 
-// 実データを使用するため false に設定
 const USE_MOCK = false;
 
 type Email = {
@@ -39,10 +38,8 @@ function App() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [previewEmail, setPreviewEmail] = useState<Email | null>(null);
 
-  // サーバー検索中の状態管理
   const [isSearchingServer, setIsSearchingServer] = useState(false);
 
-  // ページネーションの状態管理
   const [currentPage, setCurrentPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const PAGE_SIZE = 50;
@@ -86,7 +83,7 @@ function App() {
       try {
         const response = await invoke('get_emails', { page: targetPage, pageSize: PAGE_SIZE }) as { emails: any[], totalCount: number };
         const realEmails: Email[] = response.emails.map((e) => {
-          const flags = e.flags || [];
+          const flags: string[] = e.flags || [];
           return {
             id: String(e.id),
             subject: e.subject || '(件名なし)',
@@ -96,11 +93,11 @@ function App() {
             snippet: '',
             body: '',
             aiCategories: [],
-            isRead: flags.includes('Seen'),
-            isFlagged: flags.includes('Flagged'),
-            isAnswered: flags.includes('Answered'),
-            isDraft: flags.includes('Draft'),
-            isDeleted: flags.includes('Deleted'),
+            isRead: flags.some(f => f.toLowerCase().includes('seen')),
+            isFlagged: flags.some(f => f.toLowerCase().includes('flagged')),
+            isAnswered: flags.some(f => f.toLowerCase().includes('answered')),
+            isDraft: flags.some(f => f.toLowerCase().includes('draft')),
+            isDeleted: flags.some(f => f.toLowerCase().includes('deleted')),
             hasAttachment: false,
             account: activeAccount
           };
@@ -144,7 +141,11 @@ function App() {
       try {
         const content = await invoke<string>('get_email_content', { id: email.id });
         setReadingEmail(prev => prev ? { ...prev, body: content } : null);
-        setEmails(prev => prev.map(e => e.id === email.id ? { ...e, isRead: true } : e));
+
+        if (!email.isRead) {
+          setEmails(prev => prev.map(e => e.id === email.id ? { ...e, isRead: true } : e));
+          invoke('add_email_flags', { ids: [email.id], flags: ["Seen"] }).catch(err => console.error("Failed to mark as read:", err));
+        }
       } catch (e) {
         console.error("Content fetch error:", e);
         setReadingEmail(prev => prev ? { ...prev, body: "メール本文の取得に失敗しました。接続を確認してください。" } : null);
@@ -167,7 +168,7 @@ function App() {
       try {
         const response = await invoke('search_emails_on_server', { address, page, pageSize: PAGE_SIZE }) as { emails: any[], totalCount: number };
         const searchResults: Email[] = response.emails.map((e) => {
-          const flags = e.flags || [];
+          const flags: string[] = e.flags || [];
           return {
             id: String(e.id),
             subject: e.subject || '(件名なし)',
@@ -177,11 +178,11 @@ function App() {
             snippet: '',
             body: '',
             aiCategories: [],
-            isRead: flags.includes('Seen'),
-            isFlagged: flags.includes('Flagged'),
-            isAnswered: flags.includes('Answered'),
-            isDraft: flags.includes('Draft'),
-            isDeleted: flags.includes('Deleted'),
+            isRead: flags.some(f => f.toLowerCase().includes('seen')),
+            isFlagged: flags.some(f => f.toLowerCase().includes('flagged')),
+            isAnswered: flags.some(f => f.toLowerCase().includes('answered')),
+            isDraft: flags.some(f => f.toLowerCase().includes('draft')),
+            isDeleted: flags.some(f => f.toLowerCase().includes('deleted')),
             hasAttachment: false,
             account: activeAccount
           };
@@ -245,10 +246,9 @@ function App() {
         return sortConfig.direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
       });
     }
-    return result;
+    return result.filter(e => !e.isDeleted);
   }, [emails, activeAccount, activeFolder, searchQuery, filterUnread, sortConfig]);
 
-  // 画面右下の件数（現在表示されている件数の上限）を算出するロジック
   const currentDisplayCount = useMemo(() => {
     return filteredAndSortedEmails.length > 0
         ? currentPage * PAGE_SIZE + filteredAndSortedEmails.length
@@ -260,23 +260,86 @@ function App() {
     return sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />;
   };
 
-  const toggleReadStatus = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation(); setEmails(prev => prev.map(e => e.id === id ? { ...e, isRead: !e.isRead } : e));
+  const toggleReadStatus = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const email = emails.find(em => em.id === id);
+    if (!email) return;
+
+    const isCurrentlyRead = email.isRead;
+    setEmails(prev => prev.map(em => em.id === id ? { ...em, isRead: !isCurrentlyRead } : em));
+
+    if (!USE_MOCK) {
+      try {
+        if (isCurrentlyRead) {
+          await invoke('remove_email_flags', { ids: [id], flags: ["Seen"] });
+        } else {
+          await invoke('add_email_flags', { ids: [id], flags: ["Seen"] });
+        }
+      } catch (err) {
+        console.error("Flag update failed", err);
+        setEmails(prev => prev.map(em => em.id === id ? { ...em, isRead: isCurrentlyRead } : em));
+      }
+    }
   };
 
-  const toggleFlagStatus = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation(); setEmails(prev => prev.map(e => e.id === id ? { ...e, isFlagged: !e.isFlagged } : e));
+  const toggleFlagStatus = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const email = emails.find(em => em.id === id);
+    if (!email) return;
+
+    const isCurrentlyFlagged = email.isFlagged;
+    setEmails(prev => prev.map(em => em.id === id ? { ...em, isFlagged: !isCurrentlyFlagged } : em));
+
+    if (!USE_MOCK) {
+      try {
+        if (isCurrentlyFlagged) {
+          await invoke('remove_email_flags', { ids: [id], flags: ["Flagged"] });
+        } else {
+          await invoke('add_email_flags', { ids: [id], flags: ["Flagged"] });
+        }
+      } catch (err) {
+        console.error("Flag update failed", err);
+        setEmails(prev => prev.map(em => em.id === id ? { ...em, isFlagged: isCurrentlyFlagged } : em));
+      }
+    }
   };
 
-  const deleteEmail = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation(); setEmails(prev => prev.map(e => e.id === id ? { ...e, isDeleted: true } : e));
+  const deleteEmail = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEmails(prev => prev.map(em => em.id === id ? { ...em, isDeleted: true } : em));
     if (readingEmail?.id === id) setReadingEmail(null);
+
+    if (!USE_MOCK) {
+      try {
+        await invoke('delete_emails', { ids: [id] });
+      } catch (err) {
+        console.error("Delete failed", err);
+        setEmails(prev => prev.map(em => em.id === id ? { ...em, isDeleted: false } : em));
+      }
+    }
   };
 
-  const handleBulkAction = (action: 'read' | 'delete') => {
-    if (action === 'read') setEmails(prev => prev.map(e => selectedIds.includes(e.id) ? { ...e, isRead: true } : e));
-    else setEmails(prev => prev.map(e => selectedIds.includes(e.id) ? { ...e, isDeleted: true } : e));
-    setSelectedIds([]);
+  const handleBulkAction = async (action: 'read' | 'delete') => {
+    const idsToUpdate = [...selectedIds];
+    if (idsToUpdate.length === 0) return;
+
+    if (action === 'read') {
+      setEmails(prev => prev.map(em => idsToUpdate.includes(em.id) ? { ...em, isRead: true } : em));
+      setSelectedIds([]);
+      if (!USE_MOCK) {
+        try {
+          await invoke('add_email_flags', { ids: idsToUpdate, flags: ["Seen"] });
+        } catch(e) { console.error("Bulk read failed", e); }
+      }
+    } else {
+      setEmails(prev => prev.map(em => idsToUpdate.includes(em.id) ? { ...em, isDeleted: true } : em));
+      setSelectedIds([]);
+      if (!USE_MOCK) {
+        try {
+          await invoke('delete_emails', { ids: idsToUpdate });
+        } catch(e) { console.error("Bulk delete failed", e); }
+      }
+    }
   };
 
   return (
@@ -593,7 +656,6 @@ function App() {
               </div>
           )}
 
-          {/* --- 画面全体のローディングオーバーレイ --- */}
           {isRefreshing && (
               <div className="global-loading-overlay">
                 <div className="global-loading-content">
