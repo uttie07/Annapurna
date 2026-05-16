@@ -5,7 +5,8 @@ import {
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
   RefreshCw, ArrowLeft, Plus, Search,
   CheckCircle, Trash2, X, Eye, Zap, MessageSquare, Calendar, CreditCard,
-  Sun, Moon, CornerUpLeft, Send, Star, Reply, FileEdit, ReplyAll, Users
+  Sun, Moon, CornerUpLeft, Send, Star, Reply, FileEdit, ReplyAll, Users,
+  Settings, Bot
 } from 'lucide-react';
 import './App.css';
 
@@ -25,6 +26,12 @@ type EmailDetailResponse = {
 
 type SortConfig = { key: keyof Email; direction: 'asc' | 'desc'; } | null;
 
+type InsightData = {
+  aiScore: number;
+  summary: string;
+  actions: string[];
+};
+
 function App() {
   const [emails, setEmails] = useState<Email[]>([]);
   const [sortConfig, setSortConfig] = useState<SortConfig>(null);
@@ -35,9 +42,6 @@ function App() {
   const [activeAccount, setActiveAccount] = useState<string>('work');
   const [activeFolder, setActiveFolder] = useState<string>('inbox');
   const [isDarkMode, setIsDarkMode] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [aiDraft, setAiDraft] = useState<string | null>(null);
-  const [isDrafting, setIsDrafting] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterUnread, setFilterUnread] = useState(false);
@@ -53,11 +57,18 @@ function App() {
   const [composingDraftId, setComposingDraftId] = useState<string | null>(null);
   const [isLoadingDraft, setIsLoadingDraft] = useState(false);
 
+  const [showReplyForm, setShowReplyForm] = useState(false);
   const [replyText, setReplyText] = useState('');
   const [replyType, setReplyType] = useState<'reply' | 'replyAll'>('reply');
   const [replyCc, setReplyCc] = useState('');
   const [replyBcc, setReplyBcc] = useState('');
   const [showReplyCcBcc, setShowReplyCcBcc] = useState(false);
+
+  const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('geminiApiKey') || '');
+  const [showSettings, setShowSettings] = useState(false);
+  const [isAnalyzingInsight, setIsAnalyzingInsight] = useState(false);
+  const [insightData, setInsightData] = useState<InsightData | null>(null);
+  const [isGeneratingReply, setIsGeneratingReply] = useState(false);
 
   const [isSending, setIsSending] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -76,6 +87,11 @@ function App() {
     if (isDarkMode) document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
   }, [isDarkMode]);
+
+  const saveApiKey = (key: string) => {
+    setGeminiApiKey(key);
+    localStorage.setItem('geminiApiKey', key);
+  };
 
   const getServerFolder = () => {
     if (activeFolder === "sent") return "sent";
@@ -164,13 +180,129 @@ function App() {
 
   useEffect(() => { fetchEmails(0); }, [activeAccount, activeFolder]);
 
-  const handlePreviewEmail = (email: Email) => {
+  const analyzeEmailWithGemini = async (email: Email, bodyContent: string) => {
+    if (!geminiApiKey) {
+      setInsightData({ aiScore: 0, summary: "APIキーが設定されていません。左下の歯車アイコンからGemini APIキーを登録してください。", actions: [] });
+      return;
+    }
+
+    setIsAnalyzingInsight(true);
+    try {
+      const tempDiv = document.createElement("div");
+      tempDiv.innerHTML = bodyContent;
+      const plainText = (tempDiv.innerText || tempDiv.textContent || "").substring(0, 3000);
+
+      const prompt = `以下のメールを解析し、JSON形式で結果を返してください。
+フォーマット:
+{
+  "aiScore": number (0-100で、対応の緊急度や重要度を示すスコア),
+  "summary": string (メールの要旨を3行程度の箇条書き、または短いテキストで),
+  "actions": string[] (受信者が次にとるべき具体的なアクションのリスト。無ければ空配列)
+}
+
+差出人: ${email.from}
+件名: ${email.subject}
+本文:
+${plainText}`;
+
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: "application/json" }
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error?.message || `API Error: ${res.status}`);
+
+      const text = data.candidates[0].content.parts[0].text;
+      const cleanText = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+
+      try {
+        const parsed: InsightData = JSON.parse(cleanText);
+        setInsightData(parsed);
+      } catch (parseError) {
+        console.error("JSON parse failed. Raw response from Gemini:", text);
+        throw new Error("解析結果の読み取りに失敗しました。");
+      }
+
+    } catch (e: any) {
+      console.error("Gemini API Error:", e);
+      setInsightData({ aiScore: 0, summary: `エラーが発生しました: ${e.message}`, actions: [] });
+    } finally {
+      setIsAnalyzingInsight(false);
+    }
+  };
+
+  const handlePreviewEmail = async (email: Email) => {
     setPreviewEmail(email);
+    setInsightData(null);
     setIsDrawerOpen(true);
+
+    const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
+    if (isTauri) {
+      setIsAnalyzingInsight(true);
+      try {
+        const contentResponse = await invoke<EmailDetailResponse>('get_email_content', { folder: getServerFolder(), id: email.id });
+        await analyzeEmailWithGemini(email, contentResponse.body);
+      } catch (e) {
+        setIsAnalyzingInsight(false);
+        setInsightData({ aiScore: 0, summary: "本文の取得に失敗したため解析できませんでした。", actions: [] });
+      }
+    }
+  };
+
+  const generateAiReply = async (intent: string) => {
+    if (!geminiApiKey) {
+      alert("AI機能を使用するには、左下の設定からGemini APIキーを登録してください。");
+      setShowSettings(true);
+      return;
+    }
+    if (!readingEmail) return;
+
+    setIsGeneratingReply(true);
+    try {
+      const tempDiv = document.createElement("div");
+      tempDiv.innerHTML = readingEmail.body;
+      const plainText = (tempDiv.innerText || tempDiv.textContent || "").substring(0, 3000);
+
+      const prompt = `以下の受信メールに対して、「${intent}」という意図で返信文（ビジネスメール）の草案を作成してください。
+出力は件名や宛名・署名のプレースホルダーを含めず、**「本文のみのプレーンテキスト」**で出力してください。
+
+差出人: ${readingEmail.from}
+件名: ${readingEmail.subject}
+本文:
+${plainText}`;
+
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }]
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error?.message || `API Error: ${res.status}`);
+
+      const generatedText = data.candidates[0].content.parts[0].text;
+      setReplyText(generatedText.trim() + "\n\n" + replyText);
+    } catch (e: any) {
+      console.error("AI Reply Generation Error:", e);
+      alert(`AIによる返信文の生成に失敗しました。\n詳細: ${e.message}`);
+    } finally {
+      setIsGeneratingReply(false);
+    }
   };
 
   const handleSelectEmail = async (email: Email) => {
     setIsDrawerOpen(false);
+
+    if (readingEmail?.id !== email.id && previewEmail?.id !== email.id) {
+      setInsightData(null);
+    }
 
     if (activeFolder === 'drafts') {
       setIsComposeOpen(true);
@@ -213,6 +345,12 @@ function App() {
 
     setReadingEmail(email);
     setIsReadingContent(true);
+    setReplyText('');
+    setReplyCc('');
+    setReplyBcc('');
+    setShowReplyCcBcc(false);
+    setReplyType('reply');
+    setShowReplyForm(false);
 
     const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
     if (isTauri) {
@@ -221,7 +359,6 @@ function App() {
         const contentResponse = await invoke<EmailDetailResponse>('get_email_content', { folder: serverFolder, id: email.id });
 
         let formattedBody = contentResponse.body;
-        // 💡 追加: プレーンテキスト（HTMLタグが含まれない）の場合は、見やすいフォントと改行を適用
         if (!/<[a-z][\s\S]*>/i.test(formattedBody)) {
           formattedBody = `<div style="white-space: pre-wrap; font-family: sans-serif; font-size: 14px; padding: 16px; color: #333;">${formattedBody}</div>`;
         }
@@ -276,11 +413,9 @@ function App() {
     }
   };
 
-  // 💡 修正: 「返信」「全員に返信」ボタンを押したタイミングで引用文を挿入する
   const handleSetReplyType = (type: 'reply' | 'replyAll') => {
     setReplyType(type);
 
-    // まだテキストが入力されていない（空の）場合のみ、引用文を生成して挿入
     if (!replyText.trim() && readingEmail) {
       const tempDiv = document.createElement("div");
       tempDiv.innerHTML = readingEmail.body;
@@ -320,6 +455,7 @@ function App() {
       setTimeout(() => {
         setSuccessMessage(null);
         setReplyText('');
+        setShowReplyForm(false);
         setReadingEmail(null);
       }, 1500);
 
@@ -457,21 +593,6 @@ function App() {
       }, 3000);
     }
   };
-
-  // 💡 修正: 詳細画面を開いた直後はフォームを完全に空にする
-  useEffect(() => {
-    if (readingEmail && !isReadingContent) {
-      setIsAnalyzing(true); setAiDraft(null);
-      setReplyText(''); // 意図的に空白にしておく
-      setReplyCc('');
-      setReplyBcc('');
-      setShowReplyCcBcc(false);
-      setReplyType('reply');
-
-      const timer = setTimeout(() => setIsAnalyzing(false), 800);
-      return () => clearTimeout(timer);
-    }
-  }, [readingEmail, isReadingContent]);
 
   const counts = useMemo(() => {
     const accEmails = emails.filter(e => e.account === activeAccount);
@@ -630,9 +751,13 @@ function App() {
           <div className={`sidebar-item ${activeFolder === 'drafts' ? 'active' : ''}`} onClick={() => { setActiveFolder('drafts'); setCurrentPage(0); setReadingEmail(null); setIsDrawerOpen(false); }}>
             <FileEdit size={18} /> 下書き {activeFolder === 'drafts' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}
           </div>
-          <div className="theme-toggle-container">
-            <button className="theme-toggle-btn" onClick={() => setIsDarkMode(!isDarkMode)}>
-              {isDarkMode ? <Sun size={18} /> : <Moon size={18} />} {isDarkMode ? 'ライトモード' : 'ダークモード'}
+
+          <div className="theme-toggle-container" style={{ display: 'flex', gap: '8px' }}>
+            <button className="theme-toggle-btn" style={{ flex: 1 }} onClick={() => setIsDarkMode(!isDarkMode)}>
+              {isDarkMode ? <Sun size={18} /> : <Moon size={18} />} {isDarkMode ? 'ライト' : 'ダーク'}
+            </button>
+            <button className="theme-toggle-btn" style={{ width: 'auto', padding: '0 12px' }} onClick={() => setShowSettings(true)} title="設定">
+              <Settings size={18} />
             </button>
           </div>
         </div>
@@ -642,7 +767,7 @@ function App() {
               <div className="email-detail-split" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
                 <div className="email-detail-container" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
                   <div className="detail-toolbar" style={{ flexShrink: 0 }}>
-                    <button className="icon-button" onClick={() => setReadingEmail(null)} disabled={isSearchingServer}><ArrowLeft size={20} /> 戻る</button>
+                    <button className="icon-button" onClick={() => { setReadingEmail(null); setInsightData(null); }} disabled={isSearchingServer}><ArrowLeft size={20} /> 戻る</button>
                   </div>
 
                   {isSearchingServer ? (
@@ -663,11 +788,23 @@ function App() {
                       </div>
                   ) : (
                       <>
-                        <div className="detail-body-scroll" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+                        <div className="detail-body-scroll" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'hidden' }}>
                           <div className="detail-header" style={{ flexShrink: 0 }}>
                             <h2 className="detail-subject">
                               {readingEmail.isFlagged && <Star size={20} fill="#eab308" color="#eab308" style={{ display: 'inline', marginRight: '8px', verticalAlign: 'text-bottom' }} />}
                               {readingEmail.subject}
+
+                              {!insightData && (
+                                  <button
+                                      className="ai-insight-trigger"
+                                      onClick={() => analyzeEmailWithGemini(readingEmail, readingEmail.body)}
+                                      title="AIで内容を解析"
+                                      style={{ marginLeft: '12px' }}
+                                      disabled={isAnalyzingInsight}
+                                  >
+                                    {isAnalyzingInsight ? <RefreshCw size={14} className="spin" color="#8b5cf6" /> : <Sparkles size={14} color="#8b5cf6" fill="#f5f3ff" />}
+                                  </button>
+                              )}
                             </h2>
                             <div className="detail-meta">
                               <div className="sender-info">
@@ -685,6 +822,36 @@ function App() {
                               <span>{readingEmail.date}</span>
                             </div>
                           </div>
+
+                          {isAnalyzingInsight && !insightData && readingEmail && (
+                              <div style={{ padding: '0 32px 16px 32px', flexShrink: 0 }}>
+                                <div style={{ backgroundColor: 'var(--bg-app)', borderRadius: '8px', padding: '16px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '12px', color: '#8b5cf6' }}>
+                                  <RefreshCw size={18} className="spin" />
+                                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Gemini がメールを解析中...</span>
+                                </div>
+                              </div>
+                          )}
+
+                          {insightData && (
+                              <div style={{ padding: '0 32px 16px 32px', flexShrink: 0 }}>
+                                <div style={{ backgroundColor: 'rgba(139, 92, 246, 0.1)', borderRadius: '8px', padding: '16px', border: '1px solid rgba(139, 92, 246, 0.3)' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: insightData.aiScore > 70 ? '#ef4444' : '#8b5cf6' }}>
+                                    <Sparkles size={16} />
+                                    <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>AI インサイト (重要度スコア: {insightData.aiScore}点)</span>
+                                  </div>
+                                  <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-main)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{insightData.summary}</p>
+                                  {insightData.actions && insightData.actions.length > 0 && (
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '12px' }}>
+                                        {insightData.actions.map((action, idx) => (
+                                            <span key={idx} style={{ backgroundColor: 'var(--bg-main)', border: '1px solid rgba(139, 92, 246, 0.4)', color: '#8b5cf6', padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 600 }}>
+                                  {action}
+                                </span>
+                                        ))}
+                                      </div>
+                                  )}
+                                </div>
+                              </div>
+                          )}
 
                           {readingEmail.attachmentsList && readingEmail.attachmentsList.length > 0 && (
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '0 32px 16px 32px', flexShrink: 0 }}>
@@ -737,8 +904,7 @@ function App() {
                                       flex: 1,
                                       border: '1px solid var(--border-color)',
                                       borderRadius: '8px',
-                                      backgroundColor: '#ffffff',
-                                      minHeight: '50vh'
+                                      backgroundColor: '#ffffff'
                                     }}
                                     sandbox="allow-same-origin allow-popups"
                                 />
@@ -746,63 +912,110 @@ function App() {
                           </div>
                         </div>
 
-                        <div style={{ flexShrink: 0, padding: '12px 32px 16px 32px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-header)' }}>
-                          <div className="inline-reply-editor" style={{ margin: 0, backgroundColor: 'var(--bg-main)', border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden' }}>
-
-                            {/* 💡 修正: ここをクリックしたタイミングで引用文が挿入されます */}
-                            <div className="reply-to-info" style={{ borderBottom: '1px solid var(--border-color)', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <div style={{ display: 'flex', gap: '16px' }}>
-                                <button
-                                    onClick={() => handleSetReplyType('reply')}
-                                    style={{ display: 'flex', alignItems: 'center', fontWeight: replyType === 'reply' ? 'bold' : 'normal', color: replyType === 'reply' ? 'var(--text-main)' : 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                                >
-                                  <CornerUpLeft size={14} style={{ marginRight: '4px' }} /> 返信
-                                </button>
-                                <button
-                                    onClick={() => handleSetReplyType('replyAll')}
-                                    style={{ display: 'flex', alignItems: 'center', fontWeight: replyType === 'replyAll' ? 'bold' : 'normal', color: replyType === 'replyAll' ? 'var(--text-main)' : 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                                    title="元の宛先(To)全員を含める"
-                                >
-                                  <ReplyAll size={14} style={{ marginRight: '4px' }} /> 全員に返信
-                                </button>
-                              </div>
+                        {!showReplyForm ? (
+                            <div style={{ flexShrink: 0, padding: '16px 32px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', display: 'flex', gap: '12px' }}>
                               <button
-                                  onClick={() => setShowReplyCcBcc(!showReplyCcBcc)}
-                                  style={{ fontSize: '0.8rem', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}
+                                  onClick={() => { setShowReplyForm(true); handleSetReplyType('reply'); }}
+                                  style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 24px', borderRadius: '24px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-main)', color: 'var(--text-main)', fontSize: '0.9rem', fontWeight: 500, cursor: 'pointer', transition: 'all 0.2s' }}
+                                  onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-header)'}
+                                  onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-main)'}
                               >
-                                {showReplyCcBcc ? 'Cc/Bccを隠す' : 'Cc/Bccを追加'}
+                                <Reply size={18} /> 返信
+                              </button>
+                              <button
+                                  onClick={() => { setShowReplyForm(true); handleSetReplyType('replyAll'); }}
+                                  style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 24px', borderRadius: '24px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-main)', color: 'var(--text-main)', fontSize: '0.9rem', fontWeight: 500, cursor: 'pointer', transition: 'all 0.2s' }}
+                                  onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-header)'}
+                                  onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-main)'}
+                              >
+                                <ReplyAll size={18} /> 全員に返信
                               </button>
                             </div>
+                        ) : (
+                            <div style={{ flexShrink: 0, padding: '12px 32px 16px 32px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-header)' }}>
+                              <div className="inline-reply-editor" style={{ margin: 0, backgroundColor: 'var(--bg-main)', border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden' }}>
 
-                            {showReplyCcBcc && (
-                                <div style={{ display: 'flex', flexDirection: 'column', borderBottom: '1px solid var(--border-color)', padding: '6px 12px', gap: '6px', backgroundColor: 'var(--bg-header)' }}>
-                                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', width: '30px' }}>Cc:</span>
-                                    <input type="text" value={replyCc} onChange={e => setReplyCc(e.target.value)} disabled={isSending} style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: '0.85rem', color: 'var(--text-main)' }} placeholder="追加の宛先..." />
+                                <div className="reply-to-info" style={{ borderBottom: '1px solid var(--border-color)', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <div style={{ display: 'flex', gap: '16px' }}>
+                                    <button
+                                        onClick={() => handleSetReplyType('reply')}
+                                        style={{ display: 'flex', alignItems: 'center', fontWeight: replyType === 'reply' ? 'bold' : 'normal', color: replyType === 'reply' ? 'var(--text-main)' : 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                                    >
+                                      <CornerUpLeft size={14} style={{ marginRight: '4px' }} /> 返信
+                                    </button>
+                                    <button
+                                        onClick={() => handleSetReplyType('replyAll')}
+                                        style={{ display: 'flex', alignItems: 'center', fontWeight: replyType === 'replyAll' ? 'bold' : 'normal', color: replyType === 'replyAll' ? 'var(--text-main)' : 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                                        title="元の宛先(To)全員を含める"
+                                    >
+                                      <ReplyAll size={14} style={{ marginRight: '4px' }} /> 全員に返信
+                                    </button>
                                   </div>
-                                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', width: '30px' }}>Bcc:</span>
-                                    <input type="text" value={replyBcc} onChange={e => setReplyBcc(e.target.value)} disabled={isSending} style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: '0.85rem', color: 'var(--text-main)' }} placeholder="追加の宛先..." />
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                    <button
+                                        onClick={() => setShowReplyCcBcc(!showReplyCcBcc)}
+                                        style={{ fontSize: '0.8rem', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}
+                                    >
+                                      {showReplyCcBcc ? 'Cc/Bccを隠す' : 'Cc/Bccを追加'}
+                                    </button>
+                                    <button
+                                        onClick={() => setShowReplyForm(false)}
+                                        title="キャンセル"
+                                        style={{ display: 'flex', alignItems: 'center', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px' }}
+                                    >
+                                      <X size={16} />
+                                    </button>
                                   </div>
                                 </div>
-                            )}
 
-                            <textarea
-                                className="reply-textarea"
-                                placeholder="返信内容を入力..."
-                                value={replyText}
-                                onChange={(e) => setReplyText(e.target.value)}
-                                disabled={isSending}
-                                style={{ minHeight: '120px', border: 'none', backgroundColor: 'transparent' }}
-                            />
-                            <div className="reply-toolbar" style={{ padding: '8px 12px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-header)' }}>
-                              <button className="send-btn" onClick={handleSendReply} disabled={isSending || !replyText.trim()} style={{ height: '32px', fontSize: '0.85rem' }}>
-                                {isSending ? <RefreshCw size={14} className="spin" /> : <Send size={14} />}
-                                {isSending ? '送信中...' : '送信する'}
-                              </button>
+                                {showReplyCcBcc && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', borderBottom: '1px solid var(--border-color)', padding: '6px 12px', gap: '6px', backgroundColor: 'var(--bg-header)' }}>
+                                      <div style={{ display: 'flex', alignItems: 'center' }}>
+                                        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', width: '30px' }}>Cc:</span>
+                                        <input type="text" value={replyCc} onChange={e => setReplyCc(e.target.value)} disabled={isSending} style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: '0.85rem', color: 'var(--text-main)' }} placeholder="追加の宛先..." />
+                                      </div>
+                                      <div style={{ display: 'flex', alignItems: 'center' }}>
+                                        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', width: '30px' }}>Bcc:</span>
+                                        <input type="text" value={replyBcc} onChange={e => setReplyBcc(e.target.value)} disabled={isSending} style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: '0.85rem', color: 'var(--text-main)' }} placeholder="追加の宛先..." />
+                                      </div>
+                                    </div>
+                                )}
+
+                                {/* 💡 AIドラフトボタン（常時表示に変更） */}
+                                <div style={{ padding: '8px 12px', display: 'flex', gap: '8px', overflowX: 'auto', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)' }}>
+                          <span style={{ display: 'flex', alignItems: 'center', fontSize: '0.8rem', color: '#8b5cf6', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
+                            <Bot size={14} style={{ marginRight: '4px' }} /> AIドラフト:
+                          </span>
+                                  <button onClick={() => generateAiReply('承諾する、進めてほしい旨を伝える')} disabled={isGeneratingReply} className="badge badge-update" style={{ cursor: 'pointer', border: 'none', padding: '4px 10px', whiteSpace: 'nowrap' }}>👍 承諾する</button>
+                                  <button onClick={() => generateAiReply('丁寧にお断りする')} disabled={isGeneratingReply} className="badge" style={{ cursor: 'pointer', border: 'none', padding: '4px 10px', backgroundColor: 'var(--bg-main)', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border-color)' }}>👎 丁寧に断る</button>
+                                  <button onClick={() => generateAiReply('確認したことと、感謝を伝える')} disabled={isGeneratingReply} className="badge" style={{ cursor: 'pointer', border: 'none', padding: '4px 10px', backgroundColor: '#dcfce3', color: '#166534', whiteSpace: 'nowrap' }}>🙏 感謝・確認</button>
+                                </div>
+
+                                <div style={{ position: 'relative' }}>
+                                  {isGeneratingReply && (
+                                      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'var(--bg-main)', opacity: 0.7, display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 10 }}>
+                                        <RefreshCw size={24} className="spin" color="#8b5cf6" />
+                                      </div>
+                                  )}
+                                  <textarea
+                                      className="reply-textarea"
+                                      placeholder="返信内容を入力..."
+                                      value={replyText}
+                                      onChange={(e) => setReplyText(e.target.value)}
+                                      disabled={isSending || isGeneratingReply}
+                                      style={{ minHeight: '120px', border: 'none', backgroundColor: 'transparent' }}
+                                  />
+                                </div>
+
+                                <div className="reply-toolbar" style={{ padding: '8px 12px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-header)' }}>
+                                  <button className="send-btn" onClick={handleSendReply} disabled={isSending || !replyText.trim() || isGeneratingReply} style={{ height: '32px', fontSize: '0.85rem' }}>
+                                    {isSending ? <RefreshCw size={14} className="spin" /> : <Send size={14} />}
+                                    {isSending ? '送信中...' : '送信する'}
+                                  </button>
+                                </div>
+                              </div>
                             </div>
-                          </div>
-                        </div>
+                        )}
                       </>
                   )}
                 </div>
@@ -942,7 +1155,7 @@ function App() {
                                   e.stopPropagation();
                                   handlePreviewEmail(email);
                                 }}
-                                title="AIインサイトを表示"
+                                title="AIで内容を解析"
                             >
                               <Sparkles size={14} color="#8b5cf6" fill="#f5f3ff" />
                             </button>
@@ -978,34 +1191,39 @@ function App() {
                   <div className="drawer-content">
                     {previewEmail && (
                         <>
-                          <div className="insight-card">
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#2563eb', marginBottom: 8 }}>
-                              <Zap size={16} /> <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>AIスコア: 85点</span>
-                            </div>
-                            <p style={{ fontSize: '0.9rem', margin: 0, lineHeight: 1.5 }}>
-                              このメールはプロジェクトの進捗に関する重要な確認事項を含んでいる可能性があります。
-                            </p>
-                          </div>
-
                           <h3 style={{ fontSize: '1.1rem', marginBottom: 8, lineHeight: 1.4 }}>{previewEmail.subject}</h3>
                           <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 24 }}>
                             From: {previewEmail.from}
                           </div>
 
-                          <div className="ai-section" style={{ marginBottom: 24 }}>
-                            <div className="ai-section-title" style={{ marginBottom: 12 }}>予測されるアクション</div>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                              <span className="badge badge-update" style={{ padding: '6px 12px', borderRadius: '6px' }}>返信が必要</span>
-                              <span className="badge" style={{ padding: '6px 12px', borderRadius: '6px', backgroundColor: 'var(--bg-app)', color: 'var(--text-muted)' }}>後で読む</span>
-                            </div>
-                          </div>
+                          {isAnalyzingInsight ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 0', color: '#8b5cf6' }}>
+                                <RefreshCw size={32} className="spin" style={{ marginBottom: '16px' }} />
+                                <span style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>Gemini がメールを解析中...</span>
+                              </div>
+                          ) : insightData ? (
+                              <>
+                                <div className="insight-card">
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: insightData.aiScore > 70 ? '#ef4444' : '#2563eb', marginBottom: 8 }}>
+                                    <Zap size={16} /> <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>重要度スコア: {insightData.aiScore}点</span>
+                                  </div>
+                                  <p style={{ fontSize: '0.9rem', margin: 0, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                                    {insightData.summary}
+                                  </p>
+                                </div>
 
-                          <div className="ai-section">
-                            <div className="ai-section-title" style={{ marginBottom: 12 }}>クイックサマリー</div>
-                            <div style={{ fontSize: '0.9rem', color: 'var(--text-main)', opacity: 0.8 }}>
-                              本文を読み込んでAIがここに短い要約を表示します。
-                            </div>
-                          </div>
+                                {insightData.actions && insightData.actions.length > 0 && (
+                                    <div className="ai-section" style={{ marginBottom: 24 }}>
+                                      <div className="ai-section-title" style={{ marginBottom: 12 }}>予測されるアクション</div>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                        {insightData.actions.map((action, idx) => (
+                                            <span key={idx} className="badge badge-update" style={{ padding: '6px 12px', borderRadius: '6px' }}>{action}</span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                )}
+                              </>
+                          ) : null}
 
                           <div style={{ marginTop: 'auto', paddingTop: '20px' }}>
                             <button
@@ -1020,6 +1238,40 @@ function App() {
                     )}
                   </div>
                 </aside>
+              </div>
+          )}
+
+          {showSettings && (
+              <div style={{
+                position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.5)', zIndex: 2000,
+                display: 'flex', justifyContent: 'center', alignItems: 'center'
+              }}>
+                <div style={{
+                  width: '450px', backgroundColor: 'var(--bg-main)', borderRadius: '12px', padding: '24px',
+                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', display: 'flex', flexDirection: 'column', gap: '16px'
+                }}>
+                  <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}><Settings size={20} /> 設定</h3>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '8px' }}>Gemini API キー (Google AI Studio)</label>
+                    <input
+                        type="password"
+                        value={geminiApiKey}
+                        onChange={(e) => setGeminiApiKey(e.target.value)}
+                        placeholder="AI_xxxxxxxxxxxxxxxxxxx..."
+                        style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }}
+                    />
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '8px' }}>
+                      AIインサイトや返信自動生成を使用するには、<a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{ color: '#3b82f6' }}>Google AI Studio</a> から無料で取得したAPIキーを入力してください。キーはブラウザのローカル環境にのみ保存されます。
+                    </p>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '16px' }}>
+                    <button onClick={() => setShowSettings(false)} style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-main)', cursor: 'pointer' }}>キャンセル</button>
+                    <button onClick={() => { saveApiKey(geminiApiKey); setShowSettings(false); }} className="send-btn" style={{ padding: '8px 16px', borderRadius: '6px' }}>保存して閉じる</button>
+                  </div>
+                </div>
               </div>
           )}
 
