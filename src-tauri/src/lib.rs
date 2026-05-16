@@ -39,6 +39,13 @@ pub struct EmailEnvelope {
     flags: Vec<String>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmailDetailResponse {
+    pub body: String,
+    pub attachments: Vec<String>,
+}
+
 #[derive(serde::Deserialize)]
 struct AppConfig {
     accounts: std::collections::HashMap<String, AppAccount>,
@@ -128,9 +135,8 @@ async fn get_emails(folder: Option<String>, page: usize, page_size: usize) -> Re
     Ok(EmailListResponse { emails, total_count })
 }
 
-// 💡 修正: 対象のフォルダを引数で受け取るように変更
 #[tauri::command]
-async fn get_email_content(folder: Option<String>, id: String) -> Result<String, String> {
+async fn get_email_content(folder: Option<String>, id: String) -> Result<EmailDetailResponse, String> {
     let (config, account_name, imap_config, _) = get_full_config().await?;
     let account_config = Arc::new(config.account(&account_name).unwrap().clone());
 
@@ -144,7 +150,6 @@ async fn get_email_content(folder: Option<String>, id: String) -> Result<String,
     let single_id = SingleId::from(id);
     let id_enum = Id::Single(single_id);
 
-    // INBOX固定ではなく target_folder を指定
     let messages = backend
         .get_messages(&target_folder, &id_enum)
         .await
@@ -164,7 +169,15 @@ async fn get_email_content(folder: Option<String>, id: String) -> Result<String,
         "本文がありません".to_string()
     };
 
-    Ok(content)
+    let mut attachments = Vec::new();
+    if let Ok(att_vec) = email.attachments() {
+        for att in att_vec.iter() {
+            let name = att.filename.clone().unwrap_or_else(|| "untitled_file".to_string());
+            attachments.push(name);
+        }
+    }
+
+    Ok(EmailDetailResponse { body: content, attachments })
 }
 
 #[tauri::command]
@@ -218,7 +231,6 @@ async fn search_emails_on_server(folder: Option<String>, address: String, page: 
     Ok(EmailListResponse { emails, total_count })
 }
 
-// 💡 修正: フラグ操作なども対象フォルダを指定できるように変更
 #[tauri::command]
 async fn add_email_flags(folder: Option<String>, ids: Vec<String>, flags: Vec<String>) -> Result<(), String> {
     let (config, account_name, imap_config, _) = get_full_config().await?;
@@ -269,7 +281,7 @@ async fn remove_email_flags(folder: Option<String>, ids: Vec<String>, flags: Vec
 
     for id in ids {
         let target_id = Id::Single(SingleId::from(id));
-        backend.remove_flags(&target_folder, &target_id, &target_flags).await.map_err(|e| e.to_string())?;
+        backend.remove_flags(&target_folder, &target_id, &target_flags).await.map_err(|e| format!("Dark-mode flag issue: {}", e))?;
     }
 
     Ok(())
@@ -321,6 +333,42 @@ async fn send_email(to: String, subject: String, body: String) -> Result<String,
     Ok("送信完了".to_string())
 }
 
+// 💡 【2個目の修正】download_attachment のエラー箇所を完全に修正
+#[tauri::command]
+async fn download_attachment(folder: Option<String>, id: String, filename: String) -> Result<Vec<u8>, String> {
+    let (config, account_name, imap_config, _) = get_full_config().await?;
+    let account_config = Arc::new(config.account(&account_name).unwrap().clone());
+    let ctx_builder = ImapContextBuilder::new(Arc::clone(&account_config), Arc::new(imap_config));
+    let backend = BackendBuilder::new(Arc::clone(&account_config), ctx_builder)
+        .build()
+        .await
+        .map_err(|e| format!("バックエンドの接続失敗: {}", e))?;
+
+    let target_folder = folder.unwrap_or_else(|| "INBOX".to_string());
+    let single_id = SingleId::from(id);
+    let id_enum = Id::Single(single_id);
+
+    let messages = backend
+        .get_messages(&target_folder, &id_enum)
+        .await
+        .map_err(|e| format!("メールの取得に失敗: {}", e))?;
+
+    let email = messages
+        .first()
+        .ok_or_else(|| "メールが見つかりませんでした".to_string())?;
+
+    if let Ok(att_vec) = email.attachments() {
+        for att in att_vec.iter() {
+            // Option<String> と String を安全に比較するために as_deref() を使用
+            if att.filename.as_deref() == Some(filename.as_str()) {
+                return Ok(att.body.clone());
+            }
+        }
+    }
+
+    Err("添付ファイルが見つかりません".to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -341,7 +389,8 @@ pub fn run() {
             add_email_flags,
             remove_email_flags,
             delete_emails,
-            send_email
+            send_email,
+            download_attachment
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

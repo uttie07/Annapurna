@@ -1,8 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { useEffect, useState, useMemo } from 'react';
 import {
-  MountainSnow, Mail, Inbox, Sparkles, Paperclip,
-  ChevronUp, ChevronDown, ChevronLeft, ChevronRight, // 💡 ChevronLeft, ChevronRight を追加
+  MountainSnow, Mail, Inbox, Sparkles, Paperclip, Download,
+  ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
   RefreshCw, ArrowLeft, Plus, Search,
   CheckCircle, Trash2, X, Eye, Zap, MessageSquare, Calendar, CreditCard,
   Sun, Moon, CornerUpLeft, Send, Star, Reply, FileEdit
@@ -13,8 +13,14 @@ const USE_MOCK = false;
 
 type Email = {
   id: string; subject: string; from: string; to?: string; email_address: string; date: string; snippet: string;
-  body: string; aiCategories: string[]; account: string; hasAttachment: boolean;
+  body: string; aiCategories: string[]; account: string;
   isRead: boolean; isFlagged: boolean; isAnswered: boolean; isDraft: boolean; isDeleted: boolean;
+  attachmentsList?: string[];
+};
+
+type EmailDetailResponse = {
+  body: string;
+  attachments: string[];
 };
 
 type SortConfig = { key: keyof Email; direction: 'asc' | 'desc'; } | null;
@@ -43,6 +49,7 @@ function App() {
   const [isComposeSending, setIsComposeSending] = useState(false);
 
   const [isSending, setIsSending] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -120,7 +127,6 @@ function App() {
             isAnswered: flags.some(f => f.toLowerCase().includes('answered')),
             isDraft: flags.some(f => f.toLowerCase().includes('draft')),
             isDeleted: flags.some(f => f.toLowerCase().includes('deleted')),
-            hasAttachment: false,
             account: activeAccount
           };
         });
@@ -136,7 +142,7 @@ function App() {
     } else {
       setTimeout(() => {
         const mockData: Email[] = [
-          { id: "1", account: "work", subject: "【重要】サーバーメンテナンスのお知らせ", from: "管理者", email_address: "admin@example.com", date: formatEmailDate("2026-05-13T10:00:00"), snippet: "", body: "", aiCategories: ["重要"], hasAttachment: true, isRead: false, isFlagged: true, isAnswered: false, isDraft: false, isDeleted: false },
+          { id: "1", account: "work", subject: "ダミーのメール", from: "管理者", email_address: "admin@example.com", date: formatEmailDate("2026-05-13T10:00:00"), snippet: "", body: "", aiCategories: ["重要"], isRead: false, isFlagged: true, isAnswered: false, isDraft: false, isDeleted: false },
         ];
         setEmails(mockData.filter(m => m.account === activeAccount));
         setCurrentPage(targetPage);
@@ -162,8 +168,8 @@ function App() {
     if (isTauri) {
       try {
         const serverFolder = getServerFolder();
-        const content = await invoke<string>('get_email_content', { folder: serverFolder, id: email.id });
-        setReadingEmail(prev => prev ? { ...prev, body: content } : null);
+        const contentResponse = await invoke<EmailDetailResponse>('get_email_content', { folder: serverFolder, id: email.id });
+        setReadingEmail(prev => prev ? { ...prev, body: contentResponse.body, attachmentsList: contentResponse.attachments } : null);
 
         if (!email.isRead) {
           setEmails(prev => prev.map(e => e.id === email.id ? { ...e, isRead: true } : e));
@@ -177,9 +183,40 @@ function App() {
       }
     } else {
       setTimeout(() => {
-        setReadingEmail(prev => prev ? { ...prev, body: "ダミー本文" } : null);
+        setReadingEmail(prev => prev ? { ...prev, body: "ダミー本文", attachmentsList: ["report.pdf", "image.png"] } : null);
         setIsReadingContent(false);
       }, 800);
+    }
+  };
+
+  const handleDownloadAttachment = async (filename: string) => {
+    if (!readingEmail) return;
+    setIsDownloading(true);
+    try {
+      const serverFolder = getServerFolder();
+      const bytes = await invoke<number[]>('download_attachment', {
+        folder: serverFolder,
+        id: readingEmail.id,
+        filename
+      });
+
+      const uint8Array = new Uint8Array(bytes);
+      const blob = new Blob([uint8Array]);
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+    } catch (e) {
+      console.error(e);
+      alert(`ダウンロードに失敗しました: ${e}`);
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -274,7 +311,6 @@ function App() {
             isAnswered: flags.some(f => f.toLowerCase().includes('answered')),
             isDraft: flags.some(f => f.toLowerCase().includes('draft')),
             isDeleted: flags.some(f => f.toLowerCase().includes('deleted')),
-            hasAttachment: false,
             account: activeAccount
           };
         });
@@ -520,6 +556,42 @@ function App() {
                             </div>
                           </div>
 
+                          {readingEmail.attachmentsList && readingEmail.attachmentsList.length > 0 && (
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '0 32px 16px 32px', flexShrink: 0 }}>
+                                {readingEmail.attachmentsList.map((filename, idx) => (
+                                    <div
+                                        key={`${filename}-${idx}`}
+                                        onClick={() => handleDownloadAttachment(filename)}
+                                        style={{
+                                          display: 'flex', alignItems: 'center', gap: '8px',
+                                          padding: '8px 14px',
+                                          backgroundColor: 'var(--bg-app)',
+                                          border: '1px solid var(--border-color)',
+                                          borderRadius: '8px',
+                                          fontSize: '0.85rem',
+                                          cursor: 'pointer',
+                                          transition: 'all 0.2s',
+                                          color: 'var(--text-main)',
+                                          fontWeight: 500
+                                        }}
+                                        onMouseOver={(e) => {
+                                          e.currentTarget.style.backgroundColor = '#e0f2fe';
+                                          e.currentTarget.style.borderColor = '#93c5fd';
+                                        }}
+                                        onMouseOut={(e) => {
+                                          e.currentTarget.style.backgroundColor = 'var(--bg-app)';
+                                          e.currentTarget.style.borderColor = 'var(--border-color)';
+                                        }}
+                                        title="クリックしてダウンロード"
+                                    >
+                                      <Paperclip size={16} color="#3b82f6" />
+                                      {filename}
+                                      <Download size={14} style={{ marginLeft: '4px', opacity: 0.5 }} />
+                                    </div>
+                                ))}
+                              </div>
+                          )}
+
                           <div className="detail-body" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0 32px 16px 32px' }}>
                             {isReadingContent ? (
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px', color: '#9ca3af' }}>
@@ -592,7 +664,6 @@ function App() {
                     </button>
                   </div>
 
-                  {/* 💡 修正箇所: header-controls の右側にコンパクトなページャーを移動 */}
                   <div className="header-controls" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                       {selectedIds.length > 0 ? (
@@ -656,6 +727,7 @@ function App() {
                     </div>
                   </div>
 
+                  {/* 💡 ヘッダーのレイアウトから添付ファイル用の空列を削除 */}
                   <div className="list-header list-grid-layout">
                     <div className="header-cell">
                       <input
@@ -672,7 +744,6 @@ function App() {
                     <div className="header-cell">
                       {activeFolder === 'sent' || activeFolder === 'drafts' ? '送信先' : '送信元'}
                     </div>
-                    <div className="header-cell"></div>
                     <div className="header-cell" style={{ justifyContent: 'center' }}>操作</div>
                   </div>
 
@@ -718,10 +789,9 @@ function App() {
                                 : email.from}
                           </div>
 
-                          <div className="cell-reply" title="返信済み">{email.isAnswered && <Reply size={16} />}</div>
-
+                          {/* 💡 アイテムのレイアウトから添付ファイルアイコンの表示を削除 */}
                           <div className="cell-actions-container">
-                            <div className="item-attachment">{email.hasAttachment && <Paperclip size={18} />}</div>
+                            <div className="cell-reply" title="返信済み" style={{ marginRight: '8px' }}>{email.isAnswered && <Reply size={16} />}</div>
                             <div className="hover-actions" onClick={(e) => e.stopPropagation()}>
                               <button className="hover-btn" onClick={(e) => toggleReadStatus(email.id, e)} title={email.isRead ? "未読にする" : "既読にする"}><Eye size={18} /></button>
                               <button className="hover-btn" onClick={(e) => deleteEmail(email.id, e)} title="削除"><Trash2 size={18} /></button>
@@ -876,7 +946,7 @@ function App() {
               </div>
           )}
 
-          {(isRefreshing || isSending || isComposeSending || successMessage || errorMessage) && (
+          {(isRefreshing || isSending || isComposeSending || isDownloading || successMessage || errorMessage) && (
               <div className="global-loading-overlay" style={{ zIndex: 1100 }}>
                 <div
                     className="global-loading-content"
@@ -884,7 +954,7 @@ function App() {
                       borderColor: successMessage ? '#10b981' : (errorMessage ? '#ef4444' : 'var(--border-color)')
                     }}
                 >
-                  {(isRefreshing || isSending || isComposeSending) && <RefreshCw size={48} className="spin global-loading-spinner" />}
+                  {(isRefreshing || isSending || isComposeSending || isDownloading) && <RefreshCw size={48} className="spin global-loading-spinner" />}
                   {successMessage && <CheckCircle size={48} color="#10b981" style={{ marginBottom: '16px' }} />}
                   {errorMessage && <X size={48} color="#ef4444" style={{ marginBottom: '16px' }} />}
 
@@ -896,6 +966,7 @@ function App() {
                   >
                     {isRefreshing && '読み込み中...'}
                     {(isSending || isComposeSending) && '送信中...'}
+                    {isDownloading && 'ダウンロード中...'}
                     {successMessage}
                     {errorMessage}
                   </div>
