@@ -2,7 +2,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { useEffect, useState, useMemo } from 'react';
 import {
   MountainSnow, Mail, Inbox, Sparkles, Paperclip,
-  ChevronUp, ChevronDown, RefreshCw, ArrowLeft, Plus, Search,
+  ChevronUp, ChevronDown, ChevronLeft, ChevronRight, // 💡 ChevronLeft, ChevronRight を追加
+  RefreshCw, ArrowLeft, Plus, Search,
   CheckCircle, Trash2, X, Eye, Zap, MessageSquare, Calendar, CreditCard,
   Sun, Moon, CornerUpLeft, Send, Star, Reply, FileEdit
 } from 'lucide-react';
@@ -35,6 +36,12 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterUnread, setFilterUnread] = useState(false);
 
+  const [isComposeOpen, setIsComposeOpen] = useState(false);
+  const [composeTo, setComposeTo] = useState('');
+  const [composeSubject, setComposeSubject] = useState('');
+  const [composeBody, setComposeBody] = useState('');
+  const [isComposeSending, setIsComposeSending] = useState(false);
+
   const [isSending, setIsSending] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -53,7 +60,6 @@ function App() {
     else document.documentElement.classList.remove('dark');
   }, [isDarkMode]);
 
-  // 💡 共通化: 現在のUI上のフォルダからサーバー用のフォルダ名を取得するヘルパー
   const getServerFolder = () => {
     if (activeFolder === "sent") return "sent";
     if (activeFolder === "drafts") return "drafts";
@@ -156,7 +162,6 @@ function App() {
     if (isTauri) {
       try {
         const serverFolder = getServerFolder();
-        // 💡 本文取得時に対象フォルダを指定
         const content = await invoke<string>('get_email_content', { folder: serverFolder, id: email.id });
         setReadingEmail(prev => prev ? { ...prev, body: content } : null);
 
@@ -204,6 +209,38 @@ function App() {
 
     } catch (e) {
       setIsSending(false);
+      setErrorMessage(`送信に失敗しました: ${e}`);
+
+      setTimeout(() => {
+        setErrorMessage(null);
+      }, 3000);
+    }
+  };
+
+  const handleComposeSend = async () => {
+    if (!composeTo.trim() || !composeBody.trim()) return;
+    setIsComposeSending(true);
+
+    try {
+      await invoke('send_email', {
+        to: composeTo,
+        subject: composeSubject || '(件名なし)',
+        body: composeBody
+      });
+
+      setIsComposeSending(false);
+      setIsComposeOpen(false);
+      setSuccessMessage("メールを送信しました！");
+
+      setTimeout(() => {
+        setSuccessMessage(null);
+        setComposeTo('');
+        setComposeSubject('');
+        setComposeBody('');
+      }, 1500);
+
+    } catch (e) {
+      setIsComposeSending(false);
       setErrorMessage(`送信に失敗しました: ${e}`);
 
       setTimeout(() => {
@@ -325,7 +362,6 @@ function App() {
     if (!USE_MOCK) {
       try {
         const serverFolder = getServerFolder();
-        // 💡 操作時にも対象フォルダを指定
         if (isCurrentlyRead) {
           await invoke('remove_email_flags', { folder: serverFolder, ids: [id], flags: ["Seen"] });
         } else {
@@ -435,11 +471,11 @@ function App() {
           </div>
         </div>
 
-        <div className="main-content">
+        <div className="main-content" style={{ position: 'relative' }}>
           {readingEmail ? (
-              <div className="email-detail-split">
-                <div className="email-detail-container">
-                  <div className="detail-toolbar">
+              <div className="email-detail-split" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                <div className="email-detail-container" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                  <div className="detail-toolbar" style={{ flexShrink: 0 }}>
                     <button className="icon-button" onClick={() => setReadingEmail(null)} disabled={isSearchingServer}><ArrowLeft size={20} /> 戻る</button>
                   </div>
 
@@ -461,8 +497,8 @@ function App() {
                       </div>
                   ) : (
                       <>
-                        <div className="detail-body-scroll" style={{ flex: 1, overflowY: 'auto' }}>
-                          <div className="detail-header">
+                        <div className="detail-body-scroll" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+                          <div className="detail-header" style={{ flexShrink: 0 }}>
                             <h2 className="detail-subject">
                               {readingEmail.isFlagged && <Star size={20} fill="#eab308" color="#eab308" style={{ display: 'inline', marginRight: '8px', verticalAlign: 'text-bottom' }} />}
                               {readingEmail.subject}
@@ -483,7 +519,8 @@ function App() {
                               <span>{readingEmail.date}</span>
                             </div>
                           </div>
-                          <div className="detail-body" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+
+                          <div className="detail-body" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0 32px 16px 32px' }}>
                             {isReadingContent ? (
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px', color: '#9ca3af' }}>
                                   <RefreshCw size={24} className="spin" style={{ marginRight: '8px' }} /> 読み込み中...
@@ -494,10 +531,12 @@ function App() {
                                     srcDoc={readingEmail.body}
                                     style={{
                                       width: '100%',
-                                      flexGrow: 1,
-                                      border: 'none',
+                                      height: '100%',
+                                      flex: 1,
+                                      border: '1px solid var(--border-color)',
+                                      borderRadius: '8px',
                                       backgroundColor: '#ffffff',
-                                      minHeight: '400px',
+                                      minHeight: '50vh'
                                     }}
                                     sandbox="allow-same-origin allow-popups"
                                 />
@@ -505,20 +544,22 @@ function App() {
                           </div>
                         </div>
 
-                        <div style={{ flexShrink: 0, padding: '16px 40px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-header)' }}>
-                          <div className="inline-reply-editor" style={{ margin: 0 }}>
-                            <div className="reply-to-info"><CornerUpLeft size={16} /> {readingEmail.from} への返信</div>
+                        <div style={{ flexShrink: 0, padding: '12px 32px 16px 32px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-header)' }}>
+                          <div className="inline-reply-editor" style={{ margin: 0, backgroundColor: 'var(--bg-main)', border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden' }}>
+                            <div className="reply-to-info" style={{ borderBottom: '1px solid var(--border-color)', padding: '6px 12px' }}>
+                              <CornerUpLeft size={14} style={{ marginRight: '6px' }} /> {readingEmail.from} への返信
+                            </div>
                             <textarea
                                 className="reply-textarea"
                                 placeholder="返信内容を入力..."
                                 value={replyText}
                                 onChange={(e) => setReplyText(e.target.value)}
                                 disabled={isSending}
-                                style={{ minHeight: '80px' }}
+                                style={{ minHeight: '60px', border: 'none', backgroundColor: 'transparent' }}
                             />
-                            <div className="reply-toolbar" style={{ padding: '12px 16px', display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border-color)' }}>
-                              <button className="send-btn" onClick={handleSendReply} disabled={isSending}>
-                                {isSending ? <RefreshCw size={16} className="spin" /> : <Send size={16} />}
+                            <div className="reply-toolbar" style={{ padding: '8px 12px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-header)' }}>
+                              <button className="send-btn" onClick={handleSendReply} disabled={isSending || !replyText.trim()} style={{ height: '32px', fontSize: '0.85rem' }}>
+                                {isSending ? <RefreshCw size={14} className="spin" /> : <Send size={14} />}
                                 {isSending ? '送信中...' : '送信する'}
                               </button>
                             </div>
@@ -551,48 +592,68 @@ function App() {
                     </button>
                   </div>
 
-                  <div className="header-controls">
-                    {selectedIds.length > 0 ? (
-                        <div className="action-bar animate-in">
-                          <span className="action-text">{selectedIds.length} 件選択中</span>
-                          <div style={{ width: '1px', height: '20px', backgroundColor: '#bfdbfe', margin: '0 4px' }}></div>
-                          <button className="icon-button" onClick={() => handleBulkAction('read')} title="既読にする"><CheckCircle size={20} color="#1e40af" /></button>
-                          <button className="icon-button" onClick={() => handleBulkAction('delete')} title="削除する"><Trash2 size={20} color="#b91c1c" /></button>
-                          <button className="icon-button" onClick={() => setSelectedIds([])} title="選択を解除"><X size={20} /></button>
-                        </div>
-                    ) : (
-                        <div className="search-filter-group">
-                          <div className="search-container">
-                            <Search size={18} className="search-icon" />
-                            <input
-                                type="text"
-                                className="search-input"
-                                placeholder="メールを検索..."
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                            />
-                            {searchQuery && (
-                                <button
-                                    className="search-clear-btn"
-                                    onClick={() => {
-                                      setSearchQuery('');
-                                      fetchEmails(0);
-                                    }}
-                                    title="検索をクリア"
-                                >
-                                  <X size={16} />
-                                </button>
-                            )}
+                  {/* 💡 修正箇所: header-controls の右側にコンパクトなページャーを移動 */}
+                  <div className="header-controls" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      {selectedIds.length > 0 ? (
+                          <div className="action-bar animate-in" style={{ margin: 0 }}>
+                            <span className="action-text">{selectedIds.length} 件選択中</span>
+                            <div style={{ width: '1px', height: '20px', backgroundColor: '#bfdbfe', margin: '0 4px' }}></div>
+                            <button className="icon-button" onClick={() => handleBulkAction('read')} title="既読にする"><CheckCircle size={20} color="#1e40af" /></button>
+                            <button className="icon-button" onClick={() => handleBulkAction('delete')} title="削除する"><Trash2 size={20} color="#b91c1c" /></button>
+                            <button className="icon-button" onClick={() => setSelectedIds([])} title="選択を解除"><X size={20} /></button>
                           </div>
-                          <button
-                              className={`filter-button ${filterUnread ? 'active' : ''}`}
-                              onClick={() => setFilterUnread(!filterUnread)}
-                          >
-                            {filterUnread && <CheckCircle size={14} />}
-                            未読のみ
-                          </button>
-                        </div>
-                    )}
+                      ) : (
+                          <div className="search-filter-group" style={{ margin: 0 }}>
+                            <div className="search-container">
+                              <Search size={18} className="search-icon" />
+                              <input
+                                  type="text"
+                                  className="search-input"
+                                  placeholder="メールを検索..."
+                                  value={searchQuery}
+                                  onChange={(e) => setSearchQuery(e.target.value)}
+                              />
+                              {searchQuery && (
+                                  <button className="search-clear-btn" onClick={() => { setSearchQuery(''); fetchEmails(0); }} title="検索をクリア">
+                                    <X size={16} />
+                                  </button>
+                              )}
+                            </div>
+                            <button className={`filter-button ${filterUnread ? 'active' : ''}`} onClick={() => setFilterUnread(!filterUnread)}>
+                              {filterUnread && <CheckCircle size={14} />} 未読のみ
+                            </button>
+                          </div>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  <span>
+                    {filteredAndSortedEmails.length > 0
+                        ? `${currentPage * PAGE_SIZE + 1} - ${currentDisplayCount} 件`
+                        : "0 件"}
+                  </span>
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        <button
+                            className="icon-button"
+                            style={{ padding: '4px', width: '28px', height: '28px' }}
+                            disabled={currentPage === 0 || isRefreshing}
+                            onClick={() => fetchEmails(currentPage - 1)}
+                            title="前のページ"
+                        >
+                          <ChevronLeft size={18} />
+                        </button>
+                        <button
+                            className="icon-button"
+                            style={{ padding: '4px', width: '28px', height: '28px' }}
+                            disabled={!hasMore || isRefreshing}
+                            onClick={() => fetchEmails(currentPage + 1)}
+                            title="次のページ"
+                        >
+                          <ChevronRight size={18} />
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="list-header list-grid-layout">
@@ -670,31 +731,6 @@ function App() {
                     ))}
                     {filteredAndSortedEmails.length === 0 && <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>メールが見つかりません</div>}
                   </div>
-
-                  <div className="pagination-bar">
-                    <div className="total-count-info">
-                      {filteredAndSortedEmails.length > 0
-                          ? `${currentPage * PAGE_SIZE + 1} - ${currentDisplayCount} 件表示`
-                          : "0 件表示"}
-                    </div>
-                    <div className="pager-controls">
-                      <button
-                          className="pager-btn"
-                          disabled={currentPage === 0 || isRefreshing}
-                          onClick={() => fetchEmails(currentPage - 1)}
-                      >
-                        前へ
-                      </button>
-                      <span className="page-number">{currentPage + 1}</span>
-                      <button
-                          className="pager-btn"
-                          disabled={!hasMore || isRefreshing}
-                          onClick={() => fetchEmails(currentPage + 1)}
-                      >
-                        次へ
-                      </button>
-                    </div>
-                  </div>
                 </div>
 
                 <aside className={`side-drawer ${isDrawerOpen ? 'open' : ''}`}>
@@ -753,15 +789,102 @@ function App() {
               </div>
           )}
 
-          {(isRefreshing || isSending || successMessage || errorMessage) && (
-              <div className="global-loading-overlay">
+          {!readingEmail && (
+              <button
+                  onClick={() => setIsComposeOpen(true)}
+                  style={{
+                    position: 'absolute',
+                    bottom: '32px',
+                    right: '32px',
+                    width: '60px',
+                    height: '60px',
+                    borderRadius: '30px',
+                    backgroundColor: '#2563eb',
+                    color: '#fff',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    boxShadow: '0 4px 12px rgba(37, 99, 235, 0.4)',
+                    border: 'none',
+                    cursor: 'pointer',
+                    zIndex: 50,
+                    transition: 'transform 0.2s'
+                  }}
+                  title="新規メール作成"
+                  onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+                  onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
+              >
+                <Plus size={28} />
+              </button>
+          )}
+
+          {isComposeOpen && (
+              <div style={{
+                position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.5)', zIndex: 1000,
+                display: 'flex', justifyContent: 'center', alignItems: 'center'
+              }}>
+                <div style={{
+                  width: '600px', maxWidth: '90%', height: '500px',
+                  backgroundColor: 'var(--bg-main)', borderRadius: '12px',
+                  display: 'flex', flexDirection: 'column',
+                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                  overflow: 'hidden'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', backgroundColor: 'var(--bg-header)', borderBottom: '1px solid var(--border-color)' }}>
+                    <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-main)' }}>新規メッセージ</h3>
+                    <button className="icon-button" onClick={() => setIsComposeOpen(false)}><X size={20} /></button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '16px 20px', gap: '12px' }}>
+                    <input
+                        type="text"
+                        placeholder="宛先 (例: test@example.com)"
+                        value={composeTo}
+                        onChange={e => setComposeTo(e.target.value)}
+                        disabled={isComposeSending}
+                        style={{ width: '100%', padding: '10px 0', border: 'none', borderBottom: '1px solid var(--border-color)', backgroundColor: 'transparent', color: 'var(--text-main)', outline: 'none', fontSize: '0.95rem' }}
+                    />
+                    <input
+                        type="text"
+                        placeholder="件名"
+                        value={composeSubject}
+                        onChange={e => setComposeSubject(e.target.value)}
+                        disabled={isComposeSending}
+                        style={{ width: '100%', padding: '10px 0', border: 'none', borderBottom: '1px solid var(--border-color)', backgroundColor: 'transparent', color: 'var(--text-main)', outline: 'none', fontSize: '0.95rem', fontWeight: 'bold' }}
+                    />
+                    <textarea
+                        placeholder="本文を入力..."
+                        value={composeBody}
+                        onChange={e => setComposeBody(e.target.value)}
+                        disabled={isComposeSending}
+                        style={{ width: '100%', flex: 1, padding: '12px 0', border: 'none', backgroundColor: 'transparent', color: 'var(--text-main)', outline: 'none', resize: 'none', fontSize: '0.95rem', fontFamily: 'inherit' }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 20px', backgroundColor: 'var(--bg-header)', borderTop: '1px solid var(--border-color)' }}>
+                    <button className="icon-button" style={{ color: 'var(--text-muted)' }} title="添付ファイル（準備中）"><Paperclip size={18} /></button>
+                    <button
+                        className="send-btn"
+                        onClick={handleComposeSend}
+                        disabled={isComposeSending || !composeTo.trim() || !composeBody.trim()}
+                        style={{ padding: '8px 24px' }}
+                    >
+                      {isComposeSending ? <RefreshCw size={16} className="spin" /> : <Send size={16} />}
+                      {isComposeSending ? '送信中...' : '送信する'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+          )}
+
+          {(isRefreshing || isSending || isComposeSending || successMessage || errorMessage) && (
+              <div className="global-loading-overlay" style={{ zIndex: 1100 }}>
                 <div
                     className="global-loading-content"
                     style={{
                       borderColor: successMessage ? '#10b981' : (errorMessage ? '#ef4444' : 'var(--border-color)')
                     }}
                 >
-                  {(isRefreshing || isSending) && <RefreshCw size={48} className="spin global-loading-spinner" />}
+                  {(isRefreshing || isSending || isComposeSending) && <RefreshCw size={48} className="spin global-loading-spinner" />}
                   {successMessage && <CheckCircle size={48} color="#10b981" style={{ marginBottom: '16px' }} />}
                   {errorMessage && <X size={48} color="#ef4444" style={{ marginBottom: '16px' }} />}
 
@@ -772,7 +895,7 @@ function App() {
                       }}
                   >
                     {isRefreshing && '読み込み中...'}
-                    {isSending && '送信中...'}
+                    {(isSending || isComposeSending) && '送信中...'}
                     {successMessage}
                     {errorMessage}
                   </div>
