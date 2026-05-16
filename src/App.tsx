@@ -42,7 +42,7 @@ function App() {
   // サーバー検索中の状態管理
   const [isSearchingServer, setIsSearchingServer] = useState(false);
 
-  // ページネーションの状態管理（方針A：totalCountを廃止し、hasMoreを追加）
+  // ページネーションの状態管理
   const [currentPage, setCurrentPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const PAGE_SIZE = 50;
@@ -590,6 +590,16 @@ function App() {
                     )}
                   </div>
                 </aside>
+              </div>
+          )}
+
+          {/* --- 画面全体のローディングオーバーレイ --- */}
+          {isRefreshing && (
+              <div className="global-loading-overlay">
+                <div className="global-loading-content">
+                  <RefreshCw size={48} className="spin global-loading-spinner" />
+                  <div className="global-loading-text">読み込み中...</div>
+                </div>
               </div>
           )}
         </div>

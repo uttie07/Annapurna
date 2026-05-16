@@ -57,6 +57,7 @@ body {
   display: flex;
   height: 100vh;
   overflow: hidden;
+  position: relative;
 }
 
 /* --- 2. アカウントバー --- */
@@ -317,7 +318,7 @@ body {
   white-space: nowrap;
 }
 
-/* --- 5. 新設：スライドドロワー用レイアウト --- */
+/* --- 5. スライドドロワー用レイアウト --- */
 .main-layout-container {
   display: flex;
   flex: 1;
@@ -947,46 +948,6 @@ body {
   width: 75%;
 }
 
-@keyframes pulse {
-  0% {
-    transform: scale(0.9);
-    opacity: 0.4;
-  }
-  100% {
-    transform: scale(2.2);
-    opacity: 0;
-  }
-}
-
-@keyframes float {
-  0%, 100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-15px);
-  }
-}
-
-@keyframes shimmer {
-  0% {
-    left: -150%;
-  }
-  100% {
-    left: 150%;
-  }
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
 /* --- 13. 共通パーツ --- */
 .badge {
   font-size: 0.65rem;
@@ -1049,4 +1010,45 @@ body {
     opacity: 1;
     transform: translateX(0);
   }
+}
+
+/* --- 14. グローバルローディングオーバーレイ --- */
+.global-loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(255, 255, 255, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  backdrop-filter: blur(2px);
+}
+
+.dark .global-loading-overlay {
+  background-color: rgba(15, 23, 42, 0.7);
+}
+
+.global-loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background-color: var(--bg-main);
+  padding: 32px 48px;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--border-color);
+}
+
+.global-loading-spinner {
+  color: var(--unread-accent);
+  margin-bottom: 16px;
+}
+
+.global-loading-text {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-main);
 }
