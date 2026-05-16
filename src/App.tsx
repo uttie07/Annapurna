@@ -42,11 +42,14 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterUnread, setFilterUnread] = useState(false);
 
+  // 下書き用の状態
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [composeTo, setComposeTo] = useState('');
   const [composeSubject, setComposeSubject] = useState('');
   const [composeBody, setComposeBody] = useState('');
   const [isComposeSending, setIsComposeSending] = useState(false);
+  const [composingDraftId, setComposingDraftId] = useState<string | null>(null);
+  const [isLoadingDraft, setIsLoadingDraft] = useState(false);
 
   const [isSending, setIsSending] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -161,6 +164,43 @@ function App() {
 
   const handleSelectEmail = async (email: Email) => {
     setIsDrawerOpen(false);
+
+    if (activeFolder === 'drafts') {
+      setIsComposeOpen(true);
+      setComposeTo(email.to || email.from || '');
+      setComposeSubject(email.subject === '(件名なし)' ? '' : email.subject);
+      setComposeBody('');
+      setComposingDraftId(email.id);
+      setIsLoadingDraft(true);
+
+      const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
+      if (isTauri) {
+        try {
+          const serverFolder = getServerFolder();
+          const contentResponse = await invoke<EmailDetailResponse>('get_email_content', { folder: serverFolder, id: email.id });
+
+          let rawBody = contentResponse.body;
+          if (rawBody.includes('<html') || rawBody.includes('<div')) {
+            const div = document.createElement('div');
+            div.innerHTML = rawBody;
+            rawBody = div.innerText || div.textContent || '';
+          }
+          setComposeBody(rawBody.trim());
+        } catch(e) {
+          console.error(e);
+          alert("下書きの読み込みに失敗しました");
+        } finally {
+          setIsLoadingDraft(false);
+        }
+      } else {
+        setTimeout(() => {
+          setComposeBody("ダミーの下書き本文");
+          setIsLoadingDraft(false);
+        }, 500);
+      }
+      return;
+    }
+
     setReadingEmail(email);
     setIsReadingContent(true);
 
@@ -265,6 +305,10 @@ function App() {
         body: composeBody
       });
 
+      if (composingDraftId) {
+        await invoke('delete_emails', { folder: 'drafts', ids: [composingDraftId] });
+      }
+
       setIsComposeSending(false);
       setIsComposeOpen(false);
       setSuccessMessage("メールを送信しました！");
@@ -274,16 +318,42 @@ function App() {
         setComposeTo('');
         setComposeSubject('');
         setComposeBody('');
+        setComposingDraftId(null);
+        if (activeFolder === 'drafts') fetchEmails(0);
       }, 1500);
 
     } catch (e) {
       setIsComposeSending(false);
       setErrorMessage(`送信に失敗しました: ${e}`);
-
-      setTimeout(() => {
-        setErrorMessage(null);
-      }, 3000);
+      setTimeout(() => setErrorMessage(null), 3000);
     }
+  };
+
+  const handleCloseCompose = async () => {
+    if (composeTo.trim() || composeBody.trim() || composeSubject.trim()) {
+      if (window.confirm("書きかけのメールを下書きに保存しますか？")) {
+        setIsComposeSending(true);
+        try {
+          await invoke('save_draft', { to: composeTo, subject: composeSubject, body: composeBody });
+
+          if (composingDraftId) {
+            await invoke('delete_emails', { folder: 'drafts', ids: [composingDraftId] });
+          }
+
+          setSuccessMessage("下書きを保存しました");
+          if (activeFolder === 'drafts') fetchEmails(0);
+          setTimeout(() => setSuccessMessage(null), 1500);
+        } catch (e) {
+          alert(`保存に失敗しました: ${e}`);
+        }
+        setIsComposeSending(false);
+      }
+    }
+    setIsComposeOpen(false);
+    setComposeTo('');
+    setComposeSubject('');
+    setComposeBody('');
+    setComposingDraftId(null);
   };
 
   const handleServerSearch = async (address: string, page: number = 0) => {
@@ -355,7 +425,8 @@ function App() {
     let result = emails.filter(e => e.account === activeAccount);
     if (activeFolder === 'urgent') result = result.filter(e => e.aiCategories.includes("重要") || e.aiCategories.includes("至急"));
     else if (activeFolder === 'flagged') result = result.filter(e => e.isFlagged && !e.isDeleted);
-    else if (activeFolder === 'drafts') result = result.filter(e => e.isDraft && !e.isDeleted);
+    // 💡 修正箇所: ここで「isDraftフラグが付いているものだけ」という条件を外し、「削除されていなければ表示」に変更しています
+    else if (activeFolder === 'drafts') result = result.filter(e => !e.isDeleted);
     if (filterUnread) result = result.filter(e => !e.isRead);
 
     if (searchQuery) {
@@ -727,7 +798,6 @@ function App() {
                     </div>
                   </div>
 
-                  {/* 💡 ヘッダーのレイアウトから添付ファイル用の空列を削除 */}
                   <div className="list-header list-grid-layout">
                     <div className="header-cell">
                       <input
@@ -789,7 +859,6 @@ function App() {
                                 : email.from}
                           </div>
 
-                          {/* 💡 アイテムのレイアウトから添付ファイルアイコンの表示を削除 */}
                           <div className="cell-actions-container">
                             <div className="cell-reply" title="返信済み" style={{ marginRight: '8px' }}>{email.isAnswered && <Reply size={16} />}</div>
                             <div className="hover-actions" onClick={(e) => e.stopPropagation()}>
@@ -861,7 +930,13 @@ function App() {
 
           {!readingEmail && (
               <button
-                  onClick={() => setIsComposeOpen(true)}
+                  onClick={() => {
+                    setIsComposeOpen(true);
+                    setComposeTo('');
+                    setComposeSubject('');
+                    setComposeBody('');
+                    setComposingDraftId(null);
+                  }}
                   style={{
                     position: 'absolute',
                     bottom: '32px',
@@ -902,10 +977,19 @@ function App() {
                   overflow: 'hidden'
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', backgroundColor: 'var(--bg-header)', borderBottom: '1px solid var(--border-color)' }}>
-                    <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-main)' }}>新規メッセージ</h3>
-                    <button className="icon-button" onClick={() => setIsComposeOpen(false)}><X size={20} /></button>
+                    <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-main)' }}>
+                      {composingDraftId ? '下書きを編集' : '新規メッセージ'}
+                    </h3>
+                    <button className="icon-button" onClick={handleCloseCompose}><X size={20} /></button>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '16px 20px', gap: '12px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '16px 20px', gap: '12px', position: 'relative' }}>
+
+                    {isLoadingDraft && (
+                        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'var(--bg-main)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 10, opacity: 0.8 }}>
+                          <RefreshCw size={32} className="spin" color="#3b82f6" />
+                        </div>
+                    )}
+
                     <input
                         type="text"
                         placeholder="宛先 (例: test@example.com)"
@@ -965,7 +1049,7 @@ function App() {
                       }}
                   >
                     {isRefreshing && '読み込み中...'}
-                    {(isSending || isComposeSending) && '送信中...'}
+                    {(isSending || isComposeSending) && '処理中...'}
                     {isDownloading && 'ダウンロード中...'}
                     {successMessage}
                     {errorMessage}

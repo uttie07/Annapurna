@@ -17,9 +17,14 @@ use email::message::delete::DeleteMessages;
 use email::smtp::SmtpContextBuilder;
 use email::message::send::SendMessage;
 
+// 💡 サーバーにメッセージを追加（保存）するためのトレイト
+use email::message::add::AddMessage;
+
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
+
+// ⚠️ ここにあった不要な use email::message::parser::MimeHeaders; を削除しました！
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -281,7 +286,7 @@ async fn remove_email_flags(folder: Option<String>, ids: Vec<String>, flags: Vec
 
     for id in ids {
         let target_id = Id::Single(SingleId::from(id));
-        backend.remove_flags(&target_folder, &target_id, &target_flags).await.map_err(|e| format!("Dark-mode flag issue: {}", e))?;
+        backend.remove_flags(&target_folder, &target_id, &target_flags).await.map_err(|e| e.to_string())?;
     }
 
     Ok(())
@@ -333,7 +338,6 @@ async fn send_email(to: String, subject: String, body: String) -> Result<String,
     Ok("送信完了".to_string())
 }
 
-// 💡 【2個目の修正】download_attachment のエラー箇所を完全に修正
 #[tauri::command]
 async fn download_attachment(folder: Option<String>, id: String, filename: String) -> Result<Vec<u8>, String> {
     let (config, account_name, imap_config, _) = get_full_config().await?;
@@ -359,7 +363,6 @@ async fn download_attachment(folder: Option<String>, id: String, filename: Strin
 
     if let Ok(att_vec) = email.attachments() {
         for att in att_vec.iter() {
-            // Option<String> と String を安全に比較するために as_deref() を使用
             if att.filename.as_deref() == Some(filename.as_str()) {
                 return Ok(att.body.clone());
             }
@@ -367,6 +370,32 @@ async fn download_attachment(folder: Option<String>, id: String, filename: Strin
     }
 
     Err("添付ファイルが見つかりません".to_string())
+}
+
+#[tauri::command]
+async fn save_draft(to: String, subject: String, body: String) -> Result<String, String> {
+    let (config, account_name, imap_config, _) = get_full_config().await?;
+    let account_config = Arc::new(config.account(&account_name).unwrap().clone());
+    let ctx_builder = ImapContextBuilder::new(Arc::clone(&account_config), Arc::new(imap_config));
+    let backend = BackendBuilder::new(Arc::clone(&account_config), ctx_builder)
+        .build()
+        .await
+        .map_err(|e| format!("バックエンドの接続失敗: {}", e))?;
+
+    let from = &account_config.email;
+    let raw_msg = format!(
+        "From: {}\r\nTo: {}\r\nSubject: {}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{}",
+        from, to, subject, body
+    );
+
+    let target_folder = "drafts".to_string();
+
+    backend
+        .add_message(&target_folder, raw_msg.as_bytes())
+        .await
+        .map_err(|e| format!("下書きの保存に失敗: {}", e))?;
+
+    Ok("下書きを保存しました".to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -390,7 +419,8 @@ pub fn run() {
             remove_email_flags,
             delete_emails,
             send_email,
-            download_attachment
+            download_attachment,
+            save_draft
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
