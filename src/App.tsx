@@ -113,7 +113,6 @@ function App() {
         return loadedAccounts;
       } catch (e) {
         console.error("Failed to load accounts:", e);
-        // 💡 エラー内容を画面に出す
         alert(`設定ファイルの読み込みに失敗しました。\n\n詳細:\n${e}`);
       }
     } else {
@@ -774,6 +773,8 @@ ${plainText}`;
         await invoke('delete_emails', { account: activeAccount, folder: getServerFolder(), ids: [id] });
       } catch (err) {
         console.error("Delete failed", err);
+        // 💡 修正: 失敗した場合はアラートを出し、状態を元に戻す
+        alert(`削除に失敗しました: ${err}`);
         setEmails(prev => prev.map(em => em.id === id ? { ...em, isDeleted: false } : em));
       }
     }
@@ -797,7 +798,12 @@ ${plainText}`;
       if (!USE_MOCK) {
         try {
           await invoke('delete_emails', { account: activeAccount, folder: getServerFolder(), ids: idsToUpdate });
-        } catch(e) { console.error("Bulk delete failed", e); }
+        } catch(e) {
+          console.error("Bulk delete failed", e);
+          // 💡 修正: 失敗した場合はアラートを出し、状態を元に戻す
+          alert(`削除に失敗しました: ${e}`);
+          setEmails(prev => prev.map(em => idsToUpdate.includes(em.id) ? { ...em, isDeleted: false } : em));
+        }
       }
     }
   };
@@ -1146,7 +1152,7 @@ ${plainText}`;
                       {selectedIds.length > 0 ? (
                           <div className="action-bar animate-in" style={{ margin: 0 }}>
                             <span className="action-text">{selectedIds.length} 件選択中</span>
-                            <div style={{ width: '1px', height: '20px', backgroundColor: '#bfdbfe', margin: '0 4px' }}></div>
+                            <div style={{ width: '1px', height: '20px', backgroundColor: 'var(--border-color)', margin: '0 4px' }}></div>
                             <button className="icon-button" onClick={() => handleBulkAction('read')} title="既読にする"><CheckCircle size={20} color="#1e40af" /></button>
                             <button className="icon-button" onClick={() => handleBulkAction('delete')} title="削除する"><Trash2 size={20} color="#b91c1c" /></button>
                             <button className="icon-button" onClick={() => setSelectedIds([])} title="選択を解除"><X size={20} /></button>

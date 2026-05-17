@@ -47,6 +47,12 @@ pub struct EmailDetailResponse {
     pub attachments: Vec<String>,
 }
 
+// 💡 修正: ユーザー定義のフォルダエイリアスも読み取れるように構造体を追加
+#[derive(serde::Deserialize, Clone)]
+struct AppFolder {
+    aliases: Option<std::collections::HashMap<String, String>>,
+}
+
 #[derive(serde::Deserialize)]
 struct AppConfig {
     accounts: std::collections::HashMap<String, AppAccount>,
@@ -57,6 +63,7 @@ struct AppAccount {
     email: String,
     imap: email::imap::config::ImapConfig,
     smtp: Option<email::smtp::config::SmtpConfig>,
+    folder: Option<AppFolder>, // 💡 追加
 }
 
 #[tauri::command]
@@ -94,7 +101,6 @@ async fn add_account(
         .or_else(|| dirs::config_dir().map(|p| p.join("himalaya/config.toml")))
         .ok_or_else(|| "設定ファイルが見つかりません".to_string())?;
 
-    // 💡 修正: アカウント識別名（name）を囲んでいたダブルコーテーションを削除しました
     let account_toml = format!(
         r#"
 [accounts.{}]
@@ -148,6 +154,31 @@ async fn get_config_for_account(target_account: &str) -> Result<(Arc<Config>, St
     let app_account = app_config.accounts.get(target_account)
         .ok_or_else(|| format!("アカウント '{}' が見つかりません", target_account))?;
 
+    // 💡 修正: ホスト名からゴミ箱などのフォルダ名を自動推測する
+    let host = app_account.imap.host.to_lowercase();
+    let mut trash = "Trash".to_string();
+    let mut sent = "Sent".to_string();
+    let mut drafts = "Drafts".to_string();
+
+    if host.contains("gmail") {
+        trash = "[Gmail]/ゴミ箱".to_string();
+        sent = "[Gmail]/送信済みメール".to_string();
+        drafts = "[Gmail]/下書き".to_string();
+    } else if host.contains("yahoo.co.jp") {
+        trash = "ゴミ箱".to_string();
+        sent = "送信済みメール".to_string();
+        drafts = "下書き".to_string();
+    }
+
+    // もしユーザーがconfig.tomlに直接エイリアスを書いていたらそれを優先
+    if let Some(folder) = &app_account.folder {
+        if let Some(aliases) = &folder.aliases {
+            if let Some(t) = aliases.get("trash") { trash = t.clone(); }
+            if let Some(s) = aliases.get("sent") { sent = s.clone(); }
+            if let Some(d) = aliases.get("drafts") { drafts = d.clone(); }
+        }
+    }
+
     let safe_toml = format!(
         r#"
 [accounts."{}"]
@@ -155,11 +186,11 @@ name = "{}"
 email = "{}"
 
 [accounts."{}".folder.aliases]
-trash = "[Gmail]/ゴミ箱"
-sent = "[Gmail]/送信済みメール"
-drafts = "[Gmail]/下書き"
+trash = "{}"
+sent = "{}"
+drafts = "{}"
 "#,
-        target_account, target_account, app_account.email, target_account
+        target_account, target_account, app_account.email, target_account, trash, sent, drafts
     );
 
     let strict_config: Config = toml::from_str(&safe_toml)
@@ -375,7 +406,13 @@ async fn delete_emails(account: String, folder: Option<String>, ids: Vec<String>
 
     for id in ids {
         let target_id = Id::Single(SingleId::from(id));
-        backend.delete_messages(&target_folder, &target_id).await.map_err(|e| format!("削除失敗: {}", e))?;
+        // 💡 修正: ゴミ箱への移動に失敗した場合は、直接「削除済みフラグ」を立てるフォールバック機構を追加！
+        if let Err(e) = backend.delete_messages(&target_folder, &target_id).await {
+            log::warn!("ゴミ箱への移動に失敗: {}, 代わりに直接削除フラグを付与します", e);
+            let flags = Flags::from_iter(vec![Flag::Deleted]);
+            backend.add_flags(&target_folder, &target_id, &flags).await
+                .map_err(|e2| format!("ゴミ箱への移動にも、削除フラグの付与にも失敗しました (MoveError: {}, FlagError: {})", e, e2))?;
+        }
     }
 
     Ok(())
