@@ -59,7 +59,6 @@ struct AppAccount {
     smtp: Option<email::smtp::config::SmtpConfig>,
 }
 
-// 💡 新機能: config.toml にあるアカウント名の一覧をフロントエンドに返す
 #[tauri::command]
 async fn get_accounts() -> Result<Vec<String>, String> {
     let config_path = env::var("HIMALAYA_CONFIG")
@@ -75,11 +74,64 @@ async fn get_accounts() -> Result<Vec<String>, String> {
         .map_err(|e| format!("TOMLの解析に失敗しました: {}", e))?;
 
     let mut names: Vec<String> = app_config.accounts.keys().cloned().collect();
-    names.sort(); // アルファベット順にソート
+    names.sort();
     Ok(names)
 }
 
-// 💡 修正: 指定されたアカウント名(target_account)の設定を動的にビルドする
+#[tauri::command]
+async fn add_account(
+    name: String,
+    email: String,
+    imap_host: String,
+    imap_port: u16,
+    smtp_host: String,
+    smtp_port: u16,
+    password_raw: String,
+) -> Result<(), String> {
+    let config_path = env::var("HIMALAYA_CONFIG")
+        .map(PathBuf::from)
+        .ok()
+        .or_else(|| dirs::config_dir().map(|p| p.join("himalaya/config.toml")))
+        .ok_or_else(|| "設定ファイルが見つかりません".to_string())?;
+
+    // 💡 修正: アカウント識別名（name）を囲んでいたダブルコーテーションを削除しました
+    let account_toml = format!(
+        r#"
+[accounts.{}]
+email = "{}"
+
+[accounts.{}.imap]
+host = "{}"
+port = {}
+login = "{}"
+auth.type = "password"
+auth.raw = "{}"
+
+[accounts.{}.smtp]
+host = "{}"
+port = {}
+login = "{}"
+auth.type = "password"
+auth.raw = "{}"
+"#,
+        name, email,
+        name, imap_host, imap_port, email, password_raw,
+        name, smtp_host, smtp_port, email, password_raw
+    );
+
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(&config_path)
+        .map_err(|e| format!("設定ファイルを開けませんでした: {}", e))?;
+
+    file.write_all(account_toml.as_bytes())
+        .map_err(|e| format!("設定ファイルへの書き込みに失敗しました: {}", e))?;
+
+    Ok(())
+}
+
 async fn get_config_for_account(target_account: &str) -> Result<(Arc<Config>, String, email::imap::config::ImapConfig, Option<email::smtp::config::SmtpConfig>), String> {
     let config_path = env::var("HIMALAYA_CONFIG")
         .map(PathBuf::from)
@@ -446,7 +498,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_accounts, // 💡 追加
+            get_accounts,
+            add_account,
             get_emails,
             get_email_content,
             search_emails_on_server,

@@ -73,6 +73,16 @@ function App() {
   const [insightData, setInsightData] = useState<InsightData | null>(null);
   const [isGeneratingReply, setIsGeneratingReply] = useState(false);
 
+  const [isAddAccountOpen, setIsAddAccountOpen] = useState(false);
+  const [newAccName, setNewAccName] = useState('');
+  const [newAccEmail, setNewAccEmail] = useState('');
+  const [newAccImapHost, setNewAccImapHost] = useState('imap.gmail.com');
+  const [newAccImapPort, setNewAccImapPort] = useState(993);
+  const [newAccSmtpHost, setNewAccSmtpHost] = useState('smtp.gmail.com');
+  const [newAccSmtpPort, setNewAccSmtpPort] = useState(465);
+  const [newAccPassword, setNewAccPassword] = useState('');
+  const [isAccountSaving, setIsAccountSaving] = useState(false);
+
   const [isSending, setIsSending] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -91,24 +101,29 @@ function App() {
     else document.documentElement.classList.remove('dark');
   }, [isDarkMode]);
 
-  useEffect(() => {
-    const loadConfigAccounts = async () => {
-      const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
-      if (isTauri) {
-        try {
-          const loadedAccounts = await invoke('get_accounts') as string[];
-          setAccounts(loadedAccounts);
-          if (loadedAccounts.length > 0) {
-            setActiveAccount(loadedAccounts[0]);
-          }
-        } catch (e) {
-          console.error("Failed to load accounts:", e);
+  const loadConfigAccounts = async () => {
+    const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
+    if (isTauri) {
+      try {
+        const loadedAccounts = await invoke('get_accounts') as string[];
+        setAccounts(loadedAccounts);
+        if (loadedAccounts.length > 0 && !activeAccount) {
+          setActiveAccount(loadedAccounts[0]);
         }
-      } else {
-        setAccounts(['work', 'personal']);
-        setActiveAccount('work');
+        return loadedAccounts;
+      } catch (e) {
+        console.error("Failed to load accounts:", e);
+        // 💡 エラー内容を画面に出す
+        alert(`設定ファイルの読み込みに失敗しました。\n\n詳細:\n${e}`);
       }
-    };
+    } else {
+      setAccounts(['work', 'personal']);
+      if (!activeAccount) setActiveAccount('work');
+    }
+    return [];
+  };
+
+  useEffect(() => {
     loadConfigAccounts();
   }, []);
 
@@ -623,6 +638,43 @@ ${plainText}`;
     }
   };
 
+  const handleAddAccountSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAccName || !newAccEmail || !newAccPassword) {
+      alert("必須項目が入力されていません。");
+      return;
+    }
+
+    setIsAccountSaving(true);
+    try {
+      await invoke('add_account', {
+        name: newAccName,
+        email: newAccEmail,
+        imapHost: newAccImapHost,
+        imapPort: Number(newAccImapPort),
+        smtpHost: newAccSmtpHost,
+        smtpPort: Number(newAccSmtpPort),
+        passwordRaw: newAccPassword,
+      });
+
+      setSuccessMessage("アカウントを追加しました！");
+
+      setNewAccName(''); setNewAccEmail(''); setNewAccPassword('');
+      setIsAddAccountOpen(false);
+
+      const updatedList = await loadConfigAccounts();
+      if (updatedList.includes(newAccName)) {
+        setActiveAccount(newAccName);
+      }
+
+      setTimeout(() => setSuccessMessage(null), 1500);
+    } catch (err) {
+      alert(`アカウントの追加に失敗しました: ${err}`);
+    } finally {
+      setIsAccountSaving(false);
+    }
+  };
+
   const counts = useMemo(() => {
     return {
       workHasUnread: emails.some(e => e.account.toLowerCase().includes('work') && !e.isRead),
@@ -768,11 +820,10 @@ ${plainText}`;
             );
           })}
           <div style={{ width: '32px', height: '2px', backgroundColor: '#1f2937', margin: '4px 0' }}></div>
-          {/* 💡 修正: クリック時にアラートを出すように変更 */}
           <div
               className="account-icon"
               style={{ border: '1px dashed #4b5563', backgroundColor: 'transparent', cursor: 'pointer' }}
-              onClick={() => alert("アカウントの追加機能は現在開発中です。\n設定ファイル (himalaya/config.toml) を直接編集してアカウントを追加してください。")}
+              onClick={() => setIsAddAccountOpen(true)}
               title="アカウントを追加"
           >
             <Plus size={20} />
@@ -1288,16 +1339,67 @@ ${plainText}`;
               </div>
           )}
 
+          {isAddAccountOpen && (
+              <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                <form onSubmit={handleAddAccountSubmit} style={{ width: '480px', maxWidth: '95%', backgroundColor: 'var(--bg-main)', borderRadius: '12px', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column', gap: '14px', position: 'relative' }}>
+
+                  {isAccountSaving && (
+                      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'var(--bg-main)', opacity: 0.7, display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 10, borderRadius: '12px' }}>
+                        <RefreshCw size={32} className="spin" color="#2563eb" />
+                      </div>
+                  )}
+
+                  <h3 style={{ margin: 0, fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)' }}><Users size={20} /> 新しいメールアカウントを追加</h3>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>アカウントの識別名 <span style={{ color: 'red' }}>*</span></label>
+                    <input type="text" placeholder="例: personal, sub-work" value={newAccName} onChange={e => setNewAccName(e.target.value.trim())} required style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }} />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>メールアドレス <span style={{ color: 'red' }}>*</span></label>
+                    <input type="email" placeholder="example@gmail.com" value={newAccEmail} onChange={e => setNewAccEmail(e.target.value.trim())} required style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }} />
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '12px' }}>
+                    <div style={{ flex: 2 }}>
+                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>IMAPホスト</label>
+                      <input type="text" value={newAccImapHost} onChange={e => setNewAccImapHost(e.target.value.trim())} style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>ポート</label>
+                      <input type="number" value={newAccImapPort} onChange={e => setNewAccImapPort(Number(e.target.value))} style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }} />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '12px' }}>
+                    <div style={{ flex: 2 }}>
+                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>SMTPホスト</label>
+                      <input type="text" value={newAccSmtpHost} onChange={e => setNewAccSmtpHost(e.target.value.trim())} style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>ポート</label>
+                      <input type="number" value={newAccSmtpPort} onChange={e => setNewAccSmtpPort(Number(e.target.value))} style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }} />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>パスワード / アプリパスワード <span style={{ color: 'red' }}>*</span></label>
+                    <input type="password" placeholder="••••••••••••" value={newAccPassword} onChange={e => setNewAccPassword(e.target.value)} required style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }} />
+                    <p style={{ margin: '4px 0 0 0', fontSize: '0.75rem', color: 'var(--text-muted)' }}>Gmailの場合は、Googleアカウント設定で生成した16桁の「アプリパスワード」を入力してください。</p>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '12px' }}>
+                    <button type="button" onClick={() => setIsAddAccountOpen(false)} style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-main)', cursor: 'pointer' }}>キャンセル</button>
+                    <button type="submit" className="send-btn" style={{ padding: '8px 16px', borderRadius: '6px' }}>連携を開始する</button>
+                  </div>
+                </form>
+              </div>
+          )}
+
           {showSettings && (
-              <div style={{
-                position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                backgroundColor: 'rgba(0, 0, 0, 0.5)', zIndex: 2000,
-                display: 'flex', justifyContent: 'center', alignItems: 'center'
-              }}>
-                <div style={{
-                  width: '450px', backgroundColor: 'var(--bg-main)', borderRadius: '12px', padding: '24px',
-                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', display: 'flex', flexDirection: 'column', gap: '16px'
-                }}>
+              <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)', zIndex: 2000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                <div style={{ width: '450px', backgroundColor: 'var(--bg-main)', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
                   <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}><Settings size={20} /> 設定</h3>
 
                   <div>
@@ -1322,150 +1424,11 @@ ${plainText}`;
               </div>
           )}
 
-          {!readingEmail && (
-              <button
-                  onClick={() => {
-                    setIsComposeOpen(true);
-                    setComposeTo('');
-                    setComposeCc('');
-                    setComposeBcc('');
-                    setShowComposeCcBcc(false);
-                    setComposeSubject('');
-                    setComposeBody('');
-                    setComposingDraftId(null);
-                  }}
-                  style={{
-                    position: 'absolute',
-                    bottom: '32px',
-                    right: '32px',
-                    width: '60px',
-                    height: '60px',
-                    borderRadius: '30px',
-                    backgroundColor: '#2563eb',
-                    color: '#fff',
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    boxShadow: '0 4px 12px rgba(37, 99, 235, 0.4)',
-                    border: 'none',
-                    cursor: 'pointer',
-                    zIndex: 50,
-                    transition: 'transform 0.2s'
-                  }}
-                  title="新規メール作成"
-                  onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
-                  onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
-              >
-                <Plus size={28} />
-              </button>
-          )}
-
-          {isComposeOpen && (
-              <div style={{
-                position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                backgroundColor: 'rgba(0, 0, 0, 0.5)', zIndex: 1000,
-                display: 'flex', justifyContent: 'center', alignItems: 'center'
-              }}>
-                <div style={{
-                  width: '600px', maxWidth: '90%', height: '500px',
-                  backgroundColor: 'var(--bg-main)', borderRadius: '12px',
-                  display: 'flex', flexDirection: 'column',
-                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-                  overflow: 'hidden'
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', backgroundColor: 'var(--bg-header)', borderBottom: '1px solid var(--border-color)' }}>
-                    <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-main)' }}>
-                      {composingDraftId ? '下書きを編集' : '新規メッセージ'}
-                    </h3>
-                    <button className="icon-button" onClick={handleCloseCompose}><X size={20} /></button>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '16px 20px', gap: '12px', position: 'relative' }}>
-
-                    {isLoadingDraft && (
-                        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'var(--bg-main)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 10, opacity: 0.8 }}>
-                          <RefreshCw size={32} className="spin" color="#3b82f6" />
-                        </div>
-                    )}
-
-                    <div style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--border-color)' }}>
-                      <input
-                          type="text"
-                          placeholder="宛先 (例: test@example.com)"
-                          value={composeTo}
-                          onChange={e => setComposeTo(e.target.value)}
-                          disabled={isComposeSending}
-                          style={{ flex: 1, padding: '10px 0', border: 'none', backgroundColor: 'transparent', color: 'var(--text-main)', outline: 'none', fontSize: '0.95rem' }}
-                      />
-                      {!showComposeCcBcc && (
-                          <button onClick={() => setShowComposeCcBcc(true)} style={{ fontSize: '0.85rem', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>
-                            Cc/Bcc
-                          </button>
-                      )}
-                    </div>
-
-                    {showComposeCcBcc && (
-                        <>
-                          <input type="text" placeholder="Cc" value={composeCc} onChange={e => setComposeCc(e.target.value)} disabled={isComposeSending} style={{ width: '100%', padding: '10px 0', border: 'none', borderBottom: '1px solid var(--border-color)', backgroundColor: 'transparent', color: 'var(--text-main)', outline: 'none', fontSize: '0.95rem' }} />
-                          <input type="text" placeholder="Bcc" value={composeBcc} onChange={e => setComposeBcc(e.target.value)} disabled={isComposeSending} style={{ width: '100%', padding: '10px 0', border: 'none', borderBottom: '1px solid var(--border-color)', backgroundColor: 'transparent', color: 'var(--text-main)', outline: 'none', fontSize: '0.95rem' }} />
-                        </>
-                    )}
-
-                    <input
-                        type="text"
-                        placeholder="件名"
-                        value={composeSubject}
-                        onChange={e => setComposeSubject(e.target.value)}
-                        disabled={isComposeSending}
-                        style={{ width: '100%', padding: '10px 0', border: 'none', borderBottom: '1px solid var(--border-color)', backgroundColor: 'transparent', color: 'var(--text-main)', outline: 'none', fontSize: '0.95rem', fontWeight: 'bold' }}
-                    />
-                    <textarea
-                        placeholder="本文を入力..."
-                        value={composeBody}
-                        onChange={e => setComposeBody(e.target.value)}
-                        disabled={isComposeSending}
-                        style={{ width: '100%', flex: 1, padding: '12px 0', border: 'none', backgroundColor: 'transparent', color: 'var(--text-main)', outline: 'none', resize: 'none', fontSize: '0.95rem', fontFamily: 'inherit' }}
-                    />
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 20px', backgroundColor: 'var(--bg-header)', borderTop: '1px solid var(--border-color)' }}>
-                    <button className="icon-button" style={{ color: 'var(--text-muted)' }} title="添付ファイル（準備中）"><Paperclip size={18} /></button>
-                    <button
-                        className="send-btn"
-                        onClick={handleComposeSend}
-                        disabled={isComposeSending || !composeTo.trim() || !composeBody.trim()}
-                        style={{ padding: '8px 24px' }}
-                    >
-                      {isComposeSending ? <RefreshCw size={16} className="spin" /> : <Send size={16} />}
-                      {isComposeSending ? '送信中...' : '送信する'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-          )}
-
           {(isRefreshing || isSending || isComposeSending || isDownloading || successMessage || errorMessage) && (
               <div className="global-loading-overlay" style={{ zIndex: 1100 }}>
-                <div
-                    className="global-loading-content"
-                    style={{
-                      borderColor: successMessage ? '#10b981' : (errorMessage ? '#ef4444' : 'var(--border-color)')
-                    }}
-                >
+                <div className="global-loading-content">
                   {(isRefreshing || isSending || isComposeSending || isDownloading) && <RefreshCw size={48} className="spin global-loading-spinner" />}
-                  {successMessage && <CheckCircle size={48} color="#10b981" style={{ marginBottom: '16px' }} />}
-                  {errorMessage && <X size={48} color="#ef4444" style={{ marginBottom: '16px' }} />}
-
-                  <div
-                      className="global-loading-text"
-                      style={{
-                        color: successMessage ? '#10b981' : (errorMessage ? '#ef4444' : 'var(--text-main)')
-                      }}
-                  >
-                    {isRefreshing && '読み込み中...'}
-                    {(isSending || isComposeSending) && '処理中...'}
-                    {isDownloading && 'ダウンロード中...'}
-                    {successMessage}
-                    {errorMessage}
-                  </div>
+                  <div className="global-loading-text">{successMessage || errorMessage || '処理中...'}</div>
                 </div>
               </div>
           )}
