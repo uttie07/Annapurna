@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { AccountBar } from './components/AccountBar';
 import { Sidebar } from './components/Sidebar';
+import { EmailList } from './components/EmailList';
 import './App.css';
 
 // 💡 モック環境でテスト・画面改善を行う場合は true、実サーバーに繋ぐ場合は false
@@ -621,6 +622,24 @@ function App() {
     }
   };
 
+  const getFolderDisplayLabel = (folderName: string): string => {
+    switch (folderName) {
+      case 'inbox':
+        return '受信トレイ';
+      case 'sent':
+        return '送信済み';
+      case 'urgent':
+        return '至急対応';
+      case 'flagged':
+        return '星付き';
+      case 'drafts':
+        return '下書き';
+      default:
+        // 動的フォルダなどの場合は、フォルダ名をそのまま（または先頭大文字などにして）返す
+        return folderName;
+    }
+  };
+
   const handleAddAccountSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAccName || !newAccEmail || !newAccPassword) {
@@ -1068,163 +1087,36 @@ function App() {
           </div>
         ) : (
           <div className="main-layout-container">
-            <div className="email-list-container">
-              <div className="header">
-                <h2>
-                  {activeFolder === 'inbox' && <Inbox size={24} />}
-                  {activeFolder === 'sent' && <Send size={24} />}
-                  {activeFolder === 'urgent' && <Zap size={24} color="#f59e0b" />}
-                  {activeFolder === 'flagged' && <Star size={24} />}
-                  {activeFolder === 'drafts' && <FileEdit size={24} />}
-                  <span style={{ marginLeft: '8px' }}>
-                    {activeFolder === 'inbox' && '受信トレイ'}
-                    {activeFolder === 'sent' && '送信済み'}
-                    {activeFolder === 'urgent' && '至急対応'}
-                    {activeFolder === 'flagged' && '星付き'}
-                    {activeFolder === 'drafts' && '下書き'}
-                  </span>
-                </h2>
-                <button className="icon-button" onClick={() => fetchEmails(currentPage)} disabled={isRefreshing}>
-                  <RefreshCw size={20} className={isRefreshing ? "spin" : ""} />
-                </button>
-              </div>
+            {/* ✨ 巨大なベタ書きの代わりに、この1行を身代わりに置きます */}
+            <EmailList
+              activeFolder={activeFolder}
+              isRefreshing={isRefreshing}
+              searchQuery={searchQuery}
+              filterUnread={filterUnread}
+              selectedIds={selectedIds}
+              filteredAndSortedEmails={filteredAndSortedEmails}
+              readingEmail={readingEmail}
+              currentPage={currentPage}
+              PAGE_SIZE={PAGE_SIZE}
+              currentDisplayCount={currentDisplayCount}
+              hasMore={hasMore}
+              sortConfig={sortConfig}
+              getFolderDisplayLabel={getFolderDisplayLabel}
+              fetchEmails={fetchEmails}
+              setSearchQuery={setSearchQuery}
+              setFilterUnread={setFilterUnread}
+              setSelectedIds={setSelectedIds}
+              handleBulkAction={handleBulkAction}
+              setSortConfig={setSortConfig}
+              renderSortIcon={renderSortIcon}
+              handleSelectEmail={handleSelectEmail}
+              toggleFlagStatus={toggleFlagStatus}
+              handlePreviewEmail={handlePreviewEmail}
+              toggleReadStatus={toggleReadStatus}
+              deleteEmail={deleteEmail}
+            />
 
-              <div className="header-controls" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  {selectedIds.length > 0 ? (
-                    <div className="action-bar animate-in" style={{ margin: 0 }}>
-                      <span className="action-text">{selectedIds.length} 件選択中</span>
-                      <div style={{ width: '1px', height: '20px', backgroundColor: 'var(--border-color)', margin: '0 4px' }}></div>
-                      <button className="icon-button" onClick={() => handleBulkAction('read')} title="既読にする"><CheckCircle size={20} color="#1e40af" /></button>
-                      <button className="icon-button" onClick={() => handleBulkAction('delete')} title="削除する"><Trash2 size={20} color="#b91c1c" /></button>
-                      <button className="icon-button" onClick={() => setSelectedIds([])} title="選択を解除"><X size={20} /></button>
-                    </div>
-                  ) : (
-                    <div className="search-filter-group" style={{ margin: 0 }}>
-                      <div className="search-container">
-                        <Search size={18} className="search-icon" />
-                        <input
-                          type="text"
-                          className="search-input"
-                          placeholder="メールを検索..."
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                        />
-                        {searchQuery && (
-                          <button className="search-clear-btn" onClick={() => { setSearchQuery(''); fetchEmails(0); }} title="検索をクリア">
-                            <X size={16} />
-                          </button>
-                        )}
-                      </div>
-                      <button className={`filter-button ${filterUnread ? 'active' : ''}`} onClick={() => setFilterUnread(!filterUnread)}>
-                        {filterUnread && <CheckCircle size={14} />} 未読のみ
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                  <span>
-                    {filteredAndSortedEmails.length > 0
-                      ? `${currentPage * PAGE_SIZE + 1} - ${currentDisplayCount} 件`
-                      : "0 件"}
-                  </span>
-                  <div style={{ display: 'flex', gap: '4px' }}>
-                    <button
-                      className="icon-button"
-                      style={{ padding: '4px', width: '28px', height: '28px' }}
-                      disabled={currentPage === 0 || isRefreshing}
-                      onClick={() => fetchEmails(currentPage - 1)}
-                      title="前のページ"
-                    >
-                      <ChevronLeft size={18} />
-                    </button>
-                    <button
-                      className="icon-button"
-                      style={{ padding: '4px', width: '28px', height: '28px' }}
-                      disabled={!hasMore || isRefreshing}
-                      onClick={() => fetchEmails(currentPage + 1)}
-                      title="次のページ"
-                    >
-                      <ChevronRight size={18} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="list-header list-grid-layout">
-                <div className="header-cell">
-                  <input
-                    type="checkbox"
-                    checked={filteredAndSortedEmails.length > 0 && selectedIds.length === filteredAndSortedEmails.length}
-                    onChange={(e) => setSelectedIds(e.target.checked ? filteredAndSortedEmails.map(m => m.id) : [])}
-                  />
-                </div>
-                <div className="header-cell"></div>
-                <div className="header-cell" style={{ cursor: 'pointer' }} onClick={() => setSortConfig({ key: 'date', direction: sortConfig?.direction === 'asc' ? 'desc' : 'asc' })}>
-                  日時 {renderSortIcon('date')}
-                </div>
-                <div className="header-cell">件名</div>
-                <div className="header-cell">
-                  {activeFolder === 'sent' || activeFolder === 'drafts' ? '送信先' : '送信元'}
-                </div>
-                <div className="header-cell" style={{ justifyContent: 'center' }}>操作</div>
-              </div>
-
-              <div className="email-list">
-                {filteredAndSortedEmails.map((email) => (
-                  <div
-                    key={email.id}
-                    className={`email-list-item list-grid-layout ${!email.isRead ? 'unread' : ''} ${selectedIds.includes(email.id) ? 'selected' : ''} ${readingEmail?.id === email.id ? 'active' : ''}`}
-                    onClick={() => handleSelectEmail(email)}
-                  >
-                    <div className="cell-checkbox" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.includes(email.id)}
-                        onChange={() => setSelectedIds(prev => prev.includes(email.id) ? prev.filter(i => i !== email.id) : [...prev, email.id])}
-                      />
-                    </div>
-                    <div className="cell-flag" onClick={(e) => e.stopPropagation()}>
-                      <button onClick={(e) => toggleFlagStatus(email.id, e)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-                        <Star size={16} fill={email.isFlagged ? "#eab308" : "none"} color={email.isFlagged ? "#eab308" : "#9ca3af"} />
-                      </button>
-                    </div>
-                    <div className="cell-date">{email.date}</div>
-
-                    <div className="cell-subject">
-                      {!email.isRead && <span className="unread-dot"></span>}
-                      <span className="subject-text">{email.subject}</span>
-                      <button
-                        className="ai-insight-trigger"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handlePreviewEmail(email);
-                        }}
-                        title="AIで内容を解析"
-                      >
-                        <Sparkles size={14} color="#8b5cf6" fill="#f5f3ff" />
-                      </button>
-                    </div>
-
-                    <div className="cell-from">
-                      {activeFolder === 'sent' || activeFolder === 'drafts'
-                        ? (email.to || email.from)
-                        : email.from}
-                    </div>
-
-                    <div className="cell-actions-container">
-                      <div className="hover-actions" onClick={(e) => e.stopPropagation()}>
-                        <button className="hover-btn" onClick={(e) => toggleReadStatus(email.id, e)} title={email.isRead ? "未読にする" : "既読にする"}><Eye size={18} /></button>
-                        <button className="hover-btn" onClick={(e) => deleteEmail(email.id, e)} title="削除"><Trash2 size={18} /></button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-                {filteredAndSortedEmails.length === 0 && <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>メールが見つかりません</div>}
-              </div>
-            </div>
-
+            {/* ⚠️ aside（ドロワー）のこのブロックだけは、App.tsx側にまだ残しておきます */}
             <aside className={`side-drawer ${isDrawerOpen ? 'open' : ''}`}>
               <div className="drawer-header">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
