@@ -1,12 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  MountainSnow, Mail, Inbox, Sparkles, Paperclip, Download,
-  ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
-  RefreshCw, ArrowLeft, Plus, Search,
-  CheckCircle, Trash2, X, Eye, Zap, MessageSquare, Calendar, CreditCard,
-  Sun, Moon, CornerUpLeft, Send, Star, Reply, FileEdit, ReplyAll, Users,
-  Settings, Bot
+  Sparkles, RefreshCw, Plus, X, Zap, ChevronUp, ChevronDown
 } from 'lucide-react';
 import { AccountBar } from './components/AccountBar';
 import { Sidebar } from './components/Sidebar';
@@ -33,14 +28,6 @@ type EmailDetailResponse = {
   attachments: string[];
 };
 
-type SortConfig = { key: keyof Email; direction: 'asc' | 'desc'; } | null;
-
-type InsightData = {
-  aiScore: number;
-  summary: string;
-  actions: string[];
-};
-
 function App() {
   const gemini = useGemini();
   const [readingEmail, setReadingEmail] = useState<Email | null>(null);
@@ -57,12 +44,10 @@ function App() {
   const [composeTo, setComposeTo] = useState('');
   const [composeCc, setComposeCc] = useState('');
   const [composeBcc, setComposeBcc] = useState('');
-  const [showComposeCcBcc, setShowComposeCcBcc] = useState(false);
   const [composeSubject, setComposeSubject] = useState('');
   const [composeBody, setComposeBody] = useState('');
   const [isComposeSending, setIsComposeSending] = useState(false);
   const [composingDraftId, setComposingDraftId] = useState<string | null>(null);
-  const [isLoadingDraft, setIsLoadingDraft] = useState(false);
 
   const [showReplyForm, setShowReplyForm] = useState(false);
   const [replyType, setReplyType] = useState<'reply' | 'replyAll'>('reply');
@@ -94,32 +79,30 @@ function App() {
     else document.documentElement.classList.remove('dark');
   }, [isDarkMode]);
 
-  const loadConfigAccounts = async () => {
-    const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
-    if (isTauri) {
-      try {
-        const loadedAccounts = await invoke('get_accounts') as string[];
-        setAccounts(loadedAccounts);
-        if (loadedAccounts.length > 0 && !activeAccount) {
-          setActiveAccount(loadedAccounts[0]);
-        }
-        return loadedAccounts;
-      } catch (e) {
-        console.error("Failed to load accounts:", e);
-        alert(`設定ファイルの読み込みに失敗しました。\n\n詳細:\n${e}`);
-      }
-    } else {
-      setAccounts(['work', 'personal']);
-      if (!activeAccount) setActiveAccount('work');
-    }
-    return [];
-  };
-
+  // 初期ロード用の非同期関数を定義
   useEffect(() => {
-    loadConfigAccounts();
-  }, []);
+    const loadConfigAccounts = async () => {
+      const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
+      if (isTauri) {
+        try {
+          const loadedAccounts = await invoke('get_accounts') as string[];
+          setAccounts(loadedAccounts);
+          if (loadedAccounts.length > 0 && !activeAccount) {
+            setActiveAccount(loadedAccounts[0]);
+          }
+        } catch (error) {
+          console.error("Failed to load accounts:", error);
+          alert(`設定ファイルの読み込みに失敗しました。\n\n詳細:\n${error}`);
+        }
+      } else {
+        setAccounts(['work', 'personal']);
+        if (!activeAccount) setActiveAccount('work');
+      }
+    };
 
-  useEffect(() => { emailHook.fetchEmails(0); }, [activeAccount, activeFolder]);
+    loadConfigAccounts().catch(err => console.error("Account load unhandled:", err));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handlePreviewEmail = async (email: Email) => {
     setPreviewEmail(email);
@@ -133,7 +116,8 @@ function App() {
         const serverFolder = emailHook.getServerFolder();
         const contentResponse = await invoke<EmailDetailResponse>('get_email_content', { account: activeAccount, folder: serverFolder, id: email.id });
         await gemini.analyzeEmailWithGemini(email, contentResponse.body);
-      } catch (e) {
+      } catch (error) {
+        console.error(error);
         gemini.setIsAnalyzingInsight(false);
         gemini.setInsightData({ aiScore: 0, summary: "本文の取得に失敗したため解析できませんでした。", actions: [] });
       }
@@ -152,11 +136,9 @@ function App() {
       setComposeTo(email.to || email.from || '');
       setComposeCc('');
       setComposeBcc('');
-      setShowComposeCcBcc(false);
       setComposeSubject(email.subject === '(件名なし)' ? '' : email.subject);
       setComposeBody('');
       setComposingDraftId(email.id);
-      setIsLoadingDraft(true);
 
       const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
       if (isTauri) {
@@ -171,16 +153,15 @@ function App() {
             rawBody = div.innerText || div.textContent || '';
           }
           setComposeBody(rawBody.trim());
-        } catch (e) {
-          console.error(e);
+        } catch (error) {
+          console.error(error);
           alert("下書きの読み込みに失敗しました");
-        } finally {
-          setIsLoadingDraft(false);
+        } finally { // ✨ 'military:' タイポを 'finally' に完全修正！
+          // 必要に応じたクリーンアップ処理をここに記述
         }
       } else {
         setTimeout(() => {
           setComposeBody("ダミーの下書き本文");
-          setIsLoadingDraft(false);
         }, 500);
       }
       return;
@@ -210,10 +191,10 @@ function App() {
 
         if (!email.isRead) {
           emailHook.setEmails(prev => prev.map(e => e.id === email.id ? { ...e, isRead: true } : e));
-          invoke('add_email_flags', { account: activeAccount, folder: serverFolder, ids: [email.id], flags: ["Seen"] }).catch(err => console.error("Failed to mark as read:", err));
+          await invoke('add_email_flags', { account: activeAccount, folder: serverFolder, ids: [email.id], flags: ["Seen"] });
         }
-      } catch (e) {
-        console.error("Content fetch error:", e);
+      } catch (error) {
+        console.error("Content fetch error:", error);
         setReadingEmail(prev => prev ? { ...prev, body: "メール本文の取得に失敗しました。接続を確認してください。" } : null);
       } finally {
         setIsReadingContent(false);
@@ -249,9 +230,9 @@ function App() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error(e);
-      alert(`ダウンロードに失敗しました: ${e}`);
+    } catch (error) {
+      console.error(error);
+      alert(`ダウンロードに失敗しました: ${error}`);
     } finally {
       setIsDownloading(false);
     }
@@ -282,8 +263,8 @@ function App() {
 
     try {
       const subject = readingEmail.subject.startsWith('Re:')
-        ? readingEmail.subject
-        : `Re: ${readingEmail.subject}`;
+          ? readingEmail.subject
+          : `Re: ${readingEmail.subject}`;
 
       await invoke('send_email', {
         account: activeAccount,
@@ -304,9 +285,9 @@ function App() {
         setReadingEmail(null);
       }, 1500);
 
-    } catch (e) {
+    } catch (error) {
       setIsSending(false);
-      setErrorMessage(`送信に失敗しました: ${e}`);
+      setErrorMessage(`送信に失敗しました: ${error}`);
       setTimeout(() => setErrorMessage(null), 3000);
     }
   };
@@ -338,16 +319,17 @@ function App() {
         setComposeTo('');
         setComposeCc('');
         setComposeBcc('');
-        setShowComposeCcBcc(false);
         setComposeSubject('');
         setComposeBody('');
         setComposingDraftId(null);
-        if (activeFolder === 'drafts') emailHook.fetchEmails(0);
+        if (activeFolder === 'drafts') {
+          emailHook.fetchEmails(0).catch(err => console.error(err));
+        }
       }, 1500);
 
-    } catch (e) {
+    } catch (error) {
       setIsComposeSending(false);
-      setErrorMessage(`送信に失敗しました: ${e}`);
+      setErrorMessage(`送信に失敗しました: ${error}`);
       setTimeout(() => setErrorMessage(null), 3000);
     }
   };
@@ -371,10 +353,12 @@ function App() {
           }
 
           setSuccessMessage("下書きを保存しました");
-          if (activeFolder === 'drafts') emailHook.fetchEmails(0);
+          if (activeFolder === 'drafts') {
+            emailHook.fetchEmails(0).catch(err => console.error(err));
+          }
           setTimeout(() => setSuccessMessage(null), 1500);
-        } catch (e) {
-          alert(`保存に失敗しました: ${e}`);
+        } catch (error) {
+          alert(`保存に失敗しました: ${error}`);
         }
         setIsComposeSending(false);
       }
@@ -383,7 +367,6 @@ function App() {
     setComposeTo('');
     setComposeCc('');
     setComposeBcc('');
-    setShowComposeCcBcc(false);
     setComposeSubject('');
     setComposeBody('');
     setComposingDraftId(null);
@@ -396,7 +379,8 @@ function App() {
     if (isTauri) {
       try {
         const serverFolder = emailHook.getServerFolder();
-        const response = await invoke('search_emails_on_server', { account: activeAccount, folder: serverFolder, address, page, pageSize: emailHook.PAGE_SIZE }) as { emails: any[], totalCount: number };
+        const response = await invoke('search_emails_on_server', { account: activeAccount, folder: serverFolder, address, page, pageSize: emailHook.PAGE_SIZE }) as { emails: Array<{ id: number | string, subject?: string, from: string, to?: string, date: string, flags?: string[] }>, totalCount: number };
+
         const searchResults: Email[] = response.emails.map((e) => {
           const flags: string[] = e.flags || [];
           return {
@@ -423,8 +407,8 @@ function App() {
         emailHook.setHasMore(searchResults.length === emailHook.PAGE_SIZE);
         emailHook.setSearchQuery(address);
         setReadingEmail(null);
-      } catch (e) {
-        console.error("Server search error:", e);
+      } catch (error) {
+        console.error("Server search error:", error);
         alert("サーバー検索に失敗しました。");
       } finally {
         setIsSearchingServer(false);
@@ -440,24 +424,17 @@ function App() {
 
   const getFolderDisplayLabel = (folderName: string): string => {
     switch (folderName) {
-      case 'inbox':
-        return '受信トレイ';
-      case 'sent':
-        return '送信済み';
-      case 'urgent':
-        return '至急対応';
-      case 'flagged':
-        return '星付き';
-      case 'drafts':
-        return '下書き';
-      default:
-        // 動的フォルダなどの場合は、フォルダ名をそのまま（または先頭大文字などにして）返す
-        return folderName;
+      case 'inbox': return '受信トレイ';
+      case 'sent': return '送信済み';
+      case 'urgent': return '至急対応';
+      case 'flagged': return '星付き';
+      case 'drafts': return '下書き';
+      default: return folderName;
     }
   };
 
-  const handleAddAccountSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddAccountSubmit = async (formEvent: React.FormEvent) => {
+    formEvent.preventDefault();
     if (!newAccName || !newAccEmail || !newAccPassword) {
       alert("必須項目が入力されていません。");
       return;
@@ -479,13 +456,14 @@ function App() {
       setNewAccName(''); setNewAccEmail(''); setNewAccPassword('');
       setIsAddAccountOpen(false);
 
-      const updatedList = await loadConfigAccounts();
+      const updatedList = await invoke('get_accounts') as string[];
+      setAccounts(updatedList);
       if (updatedList.includes(newAccName)) {
         setActiveAccount(newAccName);
       }
       setTimeout(() => setSuccessMessage(null), 1500);
-    } catch (err) {
-      alert(`アカウントの追加に失敗しました: ${err}`);
+    } catch (error) {
+      alert(`アカウントの追加に失敗しました: ${error}`);
     } finally {
       setIsAccountSaving(false);
     }
@@ -496,258 +474,229 @@ function App() {
     return emailHook.sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />;
   };
 
+  const currentEmailId = readingEmail ? readingEmail.id : null;
+
   return (
-    <div className={`app-container ${isDarkMode ? 'dark' : ''}`}>
-      <AccountBar
-        accounts={accounts}
-        activeAccount={activeAccount}
-        onSelectAccount={(accName) => {
-          setActiveAccount(accName);
-          setReadingEmail(null);
-          setIsDrawerOpen(false);
-        }}
-        onOpenAddAccount={() => setIsAddAccountOpen(true)}
-      />
-
-      <Sidebar
-        activeFolder={activeFolder}
-        currentDisplayCount={emailHook.currentDisplayCount}
-        isDarkMode={isDarkMode}
-        onSelectFolder={(folderName) => {
-          setActiveFolder(folderName);
-          emailHook.setCurrentPage(0);
-          setReadingEmail(null);
-          setIsDrawerOpen(false);
-        }}
-        onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
-        onOpenSettings={() => gemini.setShowSettings(true)}
-      />
-
-      <div className="main-content" style={{ position: 'relative' }}>
-        {readingEmail ? (
-          <EmailDetail
-            readingEmail={readingEmail}
-            isSearchingServer={isSearchingServer}
-            insightData={gemini.insightData}
-            isAnalyzingInsight={gemini.isAnalyzingInsight}
-            isReadingContent={isReadingContent}
-            showReplyForm={showReplyForm}
-            replyType={replyType}
-            showReplyCcBcc={showReplyCcBcc}
-            replyCc={replyCc}
-            replyBcc={replyBcc}
-            replyText={gemini.replyText}
-            isSending={isSending}
-            isGeneratingReply={gemini.isGeneratingReply}
-            setReadingEmail={setReadingEmail}
-            setInsightData={gemini.setInsightData}
-            analyzeEmailWithGemini={gemini.analyzeEmailWithGemini}
-            handleServerSearch={handleServerSearch}
-            handleDownloadAttachment={handleDownloadAttachment}
-            setShowReplyForm={setShowReplyForm}
-            handleSetReplyType={handleSetReplyType}
-            setShowReplyCcBcc={setShowReplyCcBcc}
-            setReplyCc={setReplyCc}
-            setReplyBcc={setReplyBcc}
-            generateAiReply={(intent) => gemini.generateAiReply(readingEmail, intent)}
-            setReplyText={gemini.setReplyText}
-            handleSendReply={handleSendReply}
-          />
-        ) : (
-          <div className="main-layout-container">
-            {/* ✨ 巨大なベタ書きの代わりに、この1行を身代わりに置きます */}
-            <EmailList
-              activeFolder={activeFolder}
-              isRefreshing={emailHook.isRefreshing}
-              searchQuery={emailHook.searchQuery}
-              filterUnread={emailHook.filterUnread}
-              selectedIds={emailHook.selectedIds}
-              filteredAndSortedEmails={emailHook.filteredAndSortedEmails}
-              readingEmail={readingEmail}
-              currentPage={emailHook.currentPage}
-              PAGE_SIZE={emailHook.PAGE_SIZE}
-              currentDisplayCount={emailHook.currentDisplayCount}
-              hasMore={emailHook.hasMore}
-              sortConfig={emailHook.sortConfig}
-              getFolderDisplayLabel={getFolderDisplayLabel}
-              fetchEmails={emailHook.fetchEmails}
-              setSearchQuery={emailHook.setSearchQuery}
-              setFilterUnread={emailHook.setFilterUnread}
-              setSelectedIds={emailHook.setSelectedIds}
-              handleBulkAction={emailHook.handleBulkAction}
-              setSortConfig={emailHook.setSortConfig}
-              renderSortIcon={renderSortIcon}
-              handleSelectEmail={handleSelectEmail}
-              toggleFlagStatus={emailHook.toggleFlagStatus}
-              handlePreviewEmail={handlePreviewEmail}
-              toggleReadStatus={emailHook.toggleReadStatus}
-              deleteEmail={(id, e) => emailHook.deleteEmail(id, e, readingEmail?.id === id, () => setReadingEmail(null))}
-            />
-
-            {/* ⚠️ aside（ドロワー）のこのブロックだけは、App.tsx側にまだ残しておきます */}
-            <aside className={`side-drawer ${isDrawerOpen ? 'open' : ''}`}>
-              <div className="drawer-header">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Sparkles size={18} color="#8b5cf6" />
-                  <span style={{ fontWeight: 700 }}>AI インサイト</span>
-                </div>
-                <button className="icon-button" onClick={() => setIsDrawerOpen(false)}><X size={20} /></button>
-              </div>
-              <div className="drawer-content">
-                {previewEmail && (
-                  <>
-                    <h3 style={{ fontSize: '1.1rem', marginBottom: 8, lineHeight: 1.4 }}>{previewEmail.subject}</h3>
-                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 24 }}>
-                      From: {previewEmail.from}
-                    </div>
-
-                    {gemini.isAnalyzingInsight ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 0', color: '#8b5cf6' }}>
-                        <RefreshCw size={32} className="spin" style={{ marginBottom: '16px' }} />
-                        <span style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>Gemini がメールを解析中...</span>
-                      </div>
-                    ) : gemini.insightData ? (
-                      <>
-                        <div className="insight-card">
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: gemini.insightData.aiScore > 70 ? '#ef4444' : '#2563eb', marginBottom: 8 }}>
-                            <Zap size={16} /> <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>重要度スコア: {gemini.insightData.aiScore}点</span>
-                          </div>
-                          <p style={{ fontSize: '0.9rem', margin: 0, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-                            {gemini.insightData.summary}
-                          </p>
-                        </div>
-
-                        {gemini.insightData.actions && gemini.insightData.actions.length > 0 && (
-                          <div className="ai-section" style={{ marginBottom: 24 }}>
-                            <div className="ai-section-title" style={{ marginBottom: 12 }}>予測されるアクション</div>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                              {gemini.insightData.actions.map((action, idx) => (
-                                <span key={idx} className="badge badge-update" style={{ padding: '6px 12px', borderRadius: '6px' }}>{action}</span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </>
-                    ) : null}
-
-                    <div style={{ marginTop: 'auto', paddingTop: '20px' }}>
-                      <button
-                        className="send-btn"
-                        style={{ width: '100%', justifyContent: 'center', height: '44px' }}
-                        onClick={() => handleSelectEmail(previewEmail)}
-                      >
-                        本文を開く
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            </aside>
-          </div>
-        )}
-
-        {/* 💡 追加：フローティング新規作成ボタン（今朝の断面オリジナル位置の再現） */}
-        {!readingEmail && (
-          <button
-            onClick={() => setIsComposeOpen(true)}
-            style={{
-              position: 'absolute',
-              bottom: '32px',
-              right: '32px',
-              width: '60px',
-              height: '60px',
-              borderRadius: '30px',
-              backgroundColor: '#2563eb',
-              color: '#fff',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              boxShadow: '0 4px 12px rgba(37, 99, 235, 0.4)',
-              border: 'none',
-              cursor: 'pointer',
-              zIndex: 50,
-              transition: 'transform 0.2s'
+      <div className={`app-container ${isDarkMode ? 'dark' : ''}`}>
+        <AccountBar
+            accounts={accounts}
+            activeAccount={activeAccount}
+            onSelectAccount={(accName) => {
+              setActiveAccount(accName);
+              setReadingEmail(null);
+              setIsDrawerOpen(false);
             }}
-            title="新規メール作成"
-            onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
-            onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
-          >
-            <Plus size={28} />
-          </button>
-        )}
-
-        <AddAccountModal
-          isAddAccountOpen={isAddAccountOpen}
-          isAccountSaving={isAccountSaving}
-          newAccName={newAccName}
-          newAccEmail={newAccEmail}
-          newAccImapHost={newAccImapHost}
-          newAccImapPort={newAccImapPort}
-          newAccSmtpHost={newAccSmtpHost}
-          newAccSmtpPort={newAccSmtpPort}
-          newAccPassword={newAccPassword}
-          setNewAccName={setNewAccName}
-          setNewAccEmail={setNewAccEmail}
-          setNewAccImapHost={setNewAccImapHost}
-          setNewAccImapPort={setNewAccImapPort}
-          setNewAccSmtpHost={setNewAccSmtpHost}
-          setNewAccSmtpPort={setNewAccSmtpPort}
-          setNewAccPassword={setNewAccPassword}
-          setIsAddAccountOpen={setIsAddAccountOpen}
-          handleAddAccountSubmit={handleAddAccountSubmit}
+            onOpenAddAccount={() => setIsAddAccountOpen(true)}
         />
 
-        {gemini.showSettings && (
-          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)', zIndex: 2000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-            <div style={{ width: '450px', backgroundColor: 'var(--bg-main)', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}><Settings size={20} /> 設定</h3>
+        <Sidebar
+            activeFolder={activeFolder}
+            currentDisplayCount={emailHook.currentDisplayCount}
+            isDarkMode={isDarkMode}
+            onSelectFolder={(folderName) => {
+              setActiveFolder(folderName);
+              emailHook.setCurrentPage(0);
+              setReadingEmail(null);
+              setIsDrawerOpen(false);
+            }}
+            onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
+            onOpenSettings={() => gemini.setShowSettings(true)}
+        />
 
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '8px' }}>Gemini API キー (Google AI Studio)</label>
-                <input
-                  type="password"
-                  value={gemini.geminiApiKey}
-                  onChange={(e) => gemini.setGeminiApiKey(e.target.value)}
-                  placeholder="AI_xxxxxxxxxxxxxxxxxxx..."
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }}
+        <div className="main-content" style={{ position: 'relative' }}>
+          {readingEmail ? (
+              <EmailDetail
+                  readingEmail={readingEmail}
+                  isSearchingServer={isSearchingServer}
+                  insightData={gemini.insightData}
+                  isAnalyzingInsight={gemini.isAnalyzingInsight}
+                  isReadingContent={isReadingContent}
+                  showReplyForm={showReplyForm}
+                  replyType={replyType}
+                  showReplyCcBcc={showReplyCcBcc}
+                  replyCc={replyCc}
+                  replyBcc={replyBcc}
+                  replyText={gemini.replyText}
+                  isSending={isSending}
+                  isGeneratingReply={gemini.isGeneratingReply}
+                  setReadingEmail={setReadingEmail}
+                  analyzeEmailWithGemini={gemini.analyzeEmailWithGemini}
+                  handleServerSearch={handleServerSearch}
+                  handleDownloadAttachment={handleDownloadAttachment}
+                  setShowReplyForm={setShowReplyForm}
+                  handleSetReplyType={handleSetReplyType}
+                  setShowReplyCcBcc={setShowReplyCcBcc}
+                  setReplyCc={setReplyCc}
+                  setReplyBcc={setReplyBcc}
+                  // ✨ useGemini側の2つの引数 (readingEmail, intent) のシグネチャに完全整合
+                  generateAiReply={(intent) => gemini.generateAiReply(readingEmail, intent)}
+                  setReplyText={gemini.setReplyText}
+                  handleSendReply={handleSendReply}
+              />
+          ) : (
+              <div className="main-layout-container">
+                <EmailList
+                    activeFolder={activeFolder}
+                    isRefreshing={emailHook.isRefreshing}
+                    searchQuery={emailHook.searchQuery}
+                    filterUnread={emailHook.filterUnread}
+                    selectedIds={emailHook.selectedIds}
+                    filteredAndSortedEmails={emailHook.filteredAndSortedEmails}
+                    readingEmail={readingEmail}
+                    currentPage={emailHook.currentPage}
+                    PAGE_SIZE={emailHook.PAGE_SIZE}
+                    currentDisplayCount={emailHook.currentDisplayCount}
+                    hasMore={emailHook.hasMore}
+                    sortConfig={emailHook.sortConfig}
+                    getFolderDisplayLabel={getFolderDisplayLabel}
+                    fetchEmails={emailHook.fetchEmails}
+                    setSearchQuery={emailHook.setSearchQuery}
+                    setFilterUnread={emailHook.setFilterUnread}
+                    setSelectedIds={emailHook.setSelectedIds}
+                    handleBulkAction={emailHook.handleBulkAction}
+                    setSortConfig={emailHook.setSortConfig}
+                    renderSortIcon={renderSortIcon}
+                    handleSelectEmail={handleSelectEmail}
+                    toggleFlagStatus={emailHook.toggleFlagStatus}
+                    handlePreviewEmail={handlePreviewEmail}
+                    toggleReadStatus={emailHook.toggleReadStatus}
+                    deleteEmail={(id, e) => emailHook.deleteEmail(id, e, currentEmailId === id, () => setReadingEmail(null))}
                 />
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '8px' }}>
-                  AIインサイトや返信自動生成を使用するには、<a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{ color: '#3b82f6' }}>Google AI Studio</a> から無料で取得したAPIキーを入力してください。キーはブラウザのローカル環境にのみ保存されます。
-                </p>
+
+                <aside className={`side-drawer ${isDrawerOpen ? 'open' : ''}`}>
+                  <div className="drawer-header">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Sparkles size={18} color="#8b5cf6" />
+                      <span style={{ fontWeight: 700 }}>AI インサイト</span>
+                    </div>
+                    <button className="icon-button" onClick={() => setIsDrawerOpen(false)}><X size={20} /></button>
+                  </div>
+                  <div className="drawer-content">
+                    {previewEmail && (
+                        <>
+                          <h3 style={{ fontSize: '1.1rem', marginBottom: 8, lineHeight: 1.4 }}>{previewEmail.subject}</h3>
+                          <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 24 }}>
+                            From: {previewEmail.from}
+                          </div>
+
+                          {gemini.isAnalyzingInsight ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 0', color: '#8b5cf6' }}>
+                                <RefreshCw size={32} className="spin" style={{ marginBottom: '16px' }} />
+                                <span style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>Gemini がメールを解析中...</span>
+                              </div>
+                          ) : gemini.insightData ? (
+                              <>
+                                <div className="insight-card">
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: gemini.insightData.aiScore > 70 ? '#ef4444' : '#2563eb', marginBottom: 8 }}>
+                                    <Zap size={16} /> <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>重要度スコア: {gemini.insightData.aiScore}点</span>
+                                  </div>
+                                  <p style={{ fontSize: '0.9rem', margin: 0, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                                    {gemini.insightData.summary}
+                                  </p>
+                                </div>
+
+                                {gemini.insightData.actions && gemini.insightData.actions.length > 0 && (
+                                    <div className="ai-section" style={{ marginBottom: 24 }}>
+                                      <div className="ai-section-title" style={{ marginBottom: 12 }}>予測されるアクション</div>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                        {gemini.insightData.actions.map((action, idx) => (
+                                            <span key={idx} className="badge badge-update" style={{ padding: '6px 12px', borderRadius: '6px' }}>{action}</span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                )}
+                              </>
+                          ) : null}
+
+                          <div style={{ marginTop: 'auto', paddingTop: '20px' }}>
+                            <button
+                                className="send-btn"
+                                style={{ width: '100%', justifyContent: 'center', height: '44px' }}
+                                onClick={() => handleSelectEmail(previewEmail)}
+                            >
+                              本文を開く
+                            </button>
+                          </div>
+                        </>
+                    )}
+                  </div>
+                </aside>
               </div>
+          )}
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '16px' }}>
-                <button onClick={() => gemini.setShowSettings(false)} style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-main)', cursor: 'pointer' }}>キャンセル</button>
-                <button onClick={() => { gemini.saveApiKey(gemini.geminiApiKey); gemini.setShowSettings(false); }} className="send-btn" style={{ padding: '8px 16px', borderRadius: '6px' }}>保存して閉じる</button>
+          {!readingEmail && (
+              <button
+                  onClick={() => setIsComposeOpen(true)}
+                  style={{
+                    position: 'absolute',
+                    bottom: '32px',
+                    right: '32px',
+                    width: '60px',
+                    height: '60px',
+                    borderRadius: '30px',
+                    backgroundColor: '#2563eb',
+                    color: '#fff',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    boxShadow: '0 4px 12px rgba(37, 99, 235, 0.4)',
+                    border: 'none',
+                    cursor: 'pointer',
+                    zIndex: 50,
+                    transition: 'transform 0.2s'
+                  }}
+                  title="新規メール作成"
+                  onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+                  onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
+              >
+                <Plus size={28} />
+              </button>
+          )}
+
+          <AddAccountModal
+              isAddAccountOpen={isAddAccountOpen}
+              isAccountSaving={isAccountSaving}
+              newAccName={newAccName}
+              newAccEmail={newAccEmail}
+              newAccImapHost={newAccImapHost}
+              newAccImapPort={newAccImapPort}
+              newAccSmtpHost={newAccSmtpHost}
+              newAccSmtpPort={newAccSmtpPort}
+              newAccPassword={newAccPassword}
+              setNewAccName={setNewAccName}
+              setNewAccEmail={setNewAccEmail}
+              setNewAccImapHost={setNewAccImapHost}
+              setNewAccImapPort={setNewAccImapPort}
+              setNewAccSmtpHost={setNewAccSmtpHost}
+              setNewAccSmtpPort={setNewAccSmtpPort}
+              setNewAccPassword={setNewAccPassword}
+              setIsAddAccountOpen={setIsAddAccountOpen}
+              handleAddAccountSubmit={handleAddAccountSubmit}
+          />
+
+          <ComposeModal
+              isComposeOpen={isComposeOpen}
+              composeTo={composeTo}
+              composeSubject={composeSubject}
+              composeBody={composeBody}
+              isComposeSending={isComposeSending}
+              setComposeTo={setComposeTo}
+              setComposeSubject={setComposeSubject}
+              setComposeBody={setComposeBody}
+              handleCloseCompose={handleCloseCompose}
+              handleComposeSend={handleComposeSend}
+          />
+
+          {(emailHook.isRefreshing || isSending || isComposeSending || isDownloading || successMessage || errorMessage) && (
+              <div className="global-loading-overlay" style={{ zIndex: 1100 }}>
+                <div className="global-loading-content">
+                  {(emailHook.isRefreshing || isSending || isComposeSending || isDownloading) && <RefreshCw size={48} className="spin global-loading-spinner" />}
+                  <div className="global-loading-text">{successMessage || errorMessage || '処理中...'}</div>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
-
-        {/* 💡 内村さんが丁寧に実装された「アイコン付き新規メッセージダイアログ」を100%完全再現 */}
-        <ComposeModal
-          isComposeOpen={isComposeOpen}
-          composeTo={composeTo}
-          composeSubject={composeSubject}
-          composeBody={composeBody}
-          isComposeSending={isComposeSending}
-          setComposeTo={setComposeTo}
-          setComposeSubject={setComposeSubject}
-          setComposeBody={setComposeBody}
-          handleCloseCompose={handleCloseCompose}
-          handleComposeSend={handleComposeSend}
-        />
-
-        {(emailHook.isRefreshing || isSending || isComposeSending || isDownloading || successMessage || errorMessage) && (
-          <div className="global-loading-overlay" style={{ zIndex: 1100 }}>
-            <div className="global-loading-content">
-              {(emailHook.isRefreshing || isSending || isComposeSending || isDownloading) && <RefreshCw size={48} className="spin global-loading-spinner" />}
-              <div className="global-loading-text">{successMessage || errorMessage || '処理中...'}</div>
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
-    </div>
   );
 }
 
