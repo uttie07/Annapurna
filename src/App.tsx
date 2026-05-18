@@ -15,6 +15,7 @@ import { EmailDetail } from './components/EmailDetail';
 import { ComposeModal } from './components/ComposeModal';
 import { AddAccountModal } from './components/AddAccountModal';
 import { useGemini } from './hooks/useGemini';
+import { useEmails } from './hooks/useEmails';
 import './App.css';
 
 // 💡 モック環境でテスト・画面改善を行う場合は true、実サーバーに繋ぐ場合は false
@@ -42,10 +43,6 @@ type InsightData = {
 
 function App() {
   const gemini = useGemini();
-  const [emails, setEmails] = useState<Email[]>([]);
-  const [sortConfig, setSortConfig] = useState<SortConfig>(null);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [readingEmail, setReadingEmail] = useState<Email | null>(null);
   const [isReadingContent, setIsReadingContent] = useState<boolean>(false);
 
@@ -54,9 +51,7 @@ function App() {
 
   const [activeFolder, setActiveFolder] = useState<string>('inbox');
   const [isDarkMode, setIsDarkMode] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
-
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterUnread, setFilterUnread] = useState(false);
+  const emailHook = useEmails({ activeAccount, activeFolder });
 
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [composeTo, setComposeTo] = useState('');
@@ -94,10 +89,6 @@ function App() {
   const [previewEmail, setPreviewEmail] = useState<Email | null>(null);
   const [isSearchingServer, setIsSearchingServer] = useState(false);
 
-  const [currentPage, setCurrentPage] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
-  const PAGE_SIZE = 50;
-
   useEffect(() => {
     if (isDarkMode) document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
@@ -128,94 +119,7 @@ function App() {
     loadConfigAccounts();
   }, []);
 
-
-  const getServerFolder = () => {
-    if (activeFolder === "sent") return "sent";
-    if (activeFolder === "drafts") return "drafts";
-    return "INBOX";
-  };
-
-  const formatEmailDate = (dateStr: string) => {
-    if (!dateStr) return '';
-    try {
-      const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return dateStr;
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      const hh = String(d.getHours()).padStart(2, '0');
-      const mm = String(d.getMinutes()).padStart(2, '0');
-      return `${y}-${m}-${day} ${hh}:${mm}`;
-    } catch (e) { return dateStr; }
-  };
-
-  const formatSenderName = (fromStr: string) => {
-    if (!fromStr) return '不明な宛先/送信元';
-    const match = fromStr.match(/^"?([^"<]+)"?\s*<.*>$/) || fromStr.match(/^([^<]+)/);
-    return match && match[1] ? match[1].trim() : fromStr;
-  };
-
-  const extractEmailAddress = (fromStr: string) => {
-    if (!fromStr) return '';
-    const match = fromStr.match(/<([^>]+)>/);
-    return match ? match[1] : fromStr;
-  };
-
-  const fetchEmails = async (page: number = 0) => {
-    if (!activeAccount) return;
-    const targetPage = Math.max(0, page);
-    setIsRefreshing(true);
-    const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
-
-    const serverFolder = getServerFolder();
-
-    if (isTauri) {
-      try {
-        const response = await invoke('get_emails', { account: activeAccount, folder: serverFolder, page: targetPage, pageSize: PAGE_SIZE }) as { emails: any[], totalCount: number };
-
-        const realEmails: Email[] = response.emails.map((e) => {
-          const flags: string[] = e.flags || [];
-          return {
-            id: String(e.id),
-            subject: e.subject || '(件名なし)',
-            from: formatSenderName(e.from),
-            to: e.to ? formatSenderName(e.to) : undefined,
-            email_address: extractEmailAddress(e.from),
-            date: formatEmailDate(e.date),
-            snippet: '',
-            body: '',
-            aiCategories: [],
-            isRead: flags.some(f => f.toLowerCase().includes('seen')),
-            isFlagged: flags.some(f => f.toLowerCase().includes('flagged')),
-            isAnswered: flags.some(f => f.toLowerCase().includes('answered')),
-            isDraft: flags.some(f => f.toLowerCase().includes('draft')),
-            isDeleted: flags.some(f => f.toLowerCase().includes('deleted')),
-            account: activeAccount
-          };
-        });
-
-        setEmails(realEmails);
-        setCurrentPage(targetPage);
-        setHasMore(realEmails.length === PAGE_SIZE);
-      } catch (e) {
-        console.error("Fetch error:", e);
-      } finally {
-        setIsRefreshing(false);
-      }
-    } else {
-      setTimeout(() => {
-        const mockData: Email[] = [
-          { id: "1", account: "work", subject: "ダミーのメール", from: "管理者", email_address: "admin@example.com", date: formatEmailDate("2026-05-13T10:00:00"), snippet: "", body: "", aiCategories: ["重要"], isRead: false, isFlagged: true, isAnswered: false, isDraft: false, isDeleted: false },
-        ];
-        setEmails(mockData.filter(m => m.account === activeAccount));
-        setCurrentPage(targetPage);
-        setHasMore(false);
-        setIsRefreshing(false);
-      }, 500);
-    }
-  };
-
-  useEffect(() => { fetchEmails(0); }, [activeAccount, activeFolder]);
+  useEffect(() => { emailHook.fetchEmails(0); }, [activeAccount, activeFolder]);
 
   const handlePreviewEmail = async (email: Email) => {
     setPreviewEmail(email);
@@ -226,7 +130,7 @@ function App() {
     if (isTauri) {
       gemini.setIsAnalyzingInsight(true);
       try {
-        const serverFolder = getServerFolder();
+        const serverFolder = emailHook.getServerFolder();
         const contentResponse = await invoke<EmailDetailResponse>('get_email_content', { account: activeAccount, folder: serverFolder, id: email.id });
         await gemini.analyzeEmailWithGemini(email, contentResponse.body);
       } catch (e) {
@@ -257,7 +161,7 @@ function App() {
       const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
       if (isTauri) {
         try {
-          const serverFolder = getServerFolder();
+          const serverFolder = emailHook.getServerFolder();
           const contentResponse = await invoke<EmailDetailResponse>('get_email_content', { account: activeAccount, folder: serverFolder, id: email.id });
 
           let rawBody = contentResponse.body;
@@ -294,7 +198,7 @@ function App() {
     const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
     if (isTauri) {
       try {
-        const serverFolder = getServerFolder();
+        const serverFolder = emailHook.getServerFolder();
         const contentResponse = await invoke<EmailDetailResponse>('get_email_content', { account: activeAccount, folder: serverFolder, id: email.id });
 
         let formattedBody = contentResponse.body;
@@ -305,7 +209,7 @@ function App() {
         setReadingEmail(prev => prev ? { ...prev, body: formattedBody, attachmentsList: contentResponse.attachments } : null);
 
         if (!email.isRead) {
-          setEmails(prev => prev.map(e => e.id === email.id ? { ...e, isRead: true } : e));
+          emailHook.setEmails(prev => prev.map(e => e.id === email.id ? { ...e, isRead: true } : e));
           invoke('add_email_flags', { account: activeAccount, folder: serverFolder, ids: [email.id], flags: ["Seen"] }).catch(err => console.error("Failed to mark as read:", err));
         }
       } catch (e) {
@@ -326,7 +230,7 @@ function App() {
     if (!readingEmail) return;
     setIsDownloading(true);
     try {
-      const serverFolder = getServerFolder();
+      const serverFolder = emailHook.getServerFolder();
       const bytes = await invoke<number[]>('download_attachment', {
         account: activeAccount,
         folder: serverFolder,
@@ -438,7 +342,7 @@ function App() {
         setComposeSubject('');
         setComposeBody('');
         setComposingDraftId(null);
-        if (activeFolder === 'drafts') fetchEmails(0);
+        if (activeFolder === 'drafts') emailHook.fetchEmails(0);
       }, 1500);
 
     } catch (e) {
@@ -467,7 +371,7 @@ function App() {
           }
 
           setSuccessMessage("下書きを保存しました");
-          if (activeFolder === 'drafts') fetchEmails(0);
+          if (activeFolder === 'drafts') emailHook.fetchEmails(0);
           setTimeout(() => setSuccessMessage(null), 1500);
         } catch (e) {
           alert(`保存に失敗しました: ${e}`);
@@ -491,17 +395,17 @@ function App() {
 
     if (isTauri) {
       try {
-        const serverFolder = getServerFolder();
-        const response = await invoke('search_emails_on_server', { account: activeAccount, folder: serverFolder, address, page, pageSize: PAGE_SIZE }) as { emails: any[], totalCount: number };
+        const serverFolder = emailHook.getServerFolder();
+        const response = await invoke('search_emails_on_server', { account: activeAccount, folder: serverFolder, address, page, pageSize: emailHook.PAGE_SIZE }) as { emails: any[], totalCount: number };
         const searchResults: Email[] = response.emails.map((e) => {
           const flags: string[] = e.flags || [];
           return {
             id: String(e.id),
             subject: e.subject || '(件名なし)',
-            from: formatSenderName(e.from),
-            to: e.to ? formatSenderName(e.to) : undefined,
-            email_address: extractEmailAddress(e.from),
-            date: formatEmailDate(e.date),
+            from: emailHook.formatSenderName(e.from),
+            to: e.to ? emailHook.formatSenderName(e.to) : undefined,
+            email_address: emailHook.extractEmailAddress(e.from),
+            date: emailHook.formatEmailDate(e.date),
             snippet: '',
             body: '',
             aiCategories: [],
@@ -514,10 +418,10 @@ function App() {
           };
         });
 
-        setEmails(searchResults);
-        setCurrentPage(page);
-        setHasMore(searchResults.length === PAGE_SIZE);
-        setSearchQuery(address);
+        emailHook.setEmails(searchResults);
+        emailHook.setCurrentPage(page);
+        emailHook.setHasMore(searchResults.length === emailHook.PAGE_SIZE);
+        emailHook.setSearchQuery(address);
         setReadingEmail(null);
       } catch (e) {
         console.error("Server search error:", e);
@@ -528,7 +432,7 @@ function App() {
     } else {
       setTimeout(() => {
         setIsSearchingServer(false);
-        setSearchQuery(address);
+        emailHook.setSearchQuery(address);
         setReadingEmail(null);
       }, 1000);
     }
@@ -587,136 +491,9 @@ function App() {
     }
   };
 
-  const counts = useMemo(() => {
-    return {
-      workHasUnread: emails.some(e => e.account.toLowerCase().includes('work') && !e.isRead),
-      personalHasUnread: emails.some(e => e.account.toLowerCase().includes('personal') && !e.isRead),
-    };
-  }, [emails]);
-
-  const filteredAndSortedEmails = useMemo(() => {
-    let result = emails.filter(e => e.account === activeAccount);
-    if (activeFolder === 'urgent') result = result.filter(e => e.aiCategories.includes("重要") || e.aiCategories.includes("至急"));
-    else if (activeFolder === 'flagged') result = result.filter(e => e.isFlagged && !e.isDeleted);
-    else if (activeFolder === 'drafts') result = result.filter(e => !e.isDeleted);
-    if (filterUnread) result = result.filter(e => !e.isRead);
-
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(e =>
-        e.subject.toLowerCase().includes(q) ||
-        e.from.toLowerCase().includes(q) ||
-        (e.email_address && e.email_address.toLowerCase().includes(q))
-      );
-    }
-
-    if (sortConfig) {
-      result.sort((a, b) => {
-        const aVal = String(a[sortConfig.key]); const bVal = String(b[sortConfig.key]);
-        return sortConfig.direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
-      });
-    }
-    return result.filter(e => !e.isDeleted);
-  }, [emails, activeAccount, activeFolder, searchQuery, filterUnread, sortConfig]);
-
-  const currentDisplayCount = useMemo(() => {
-    return filteredAndSortedEmails.length > 0
-      ? currentPage * PAGE_SIZE + filteredAndSortedEmails.length
-      : 0;
-  }, [currentPage, filteredAndSortedEmails.length]);
-
   const renderSortIcon = (k: keyof Email) => {
-    if (sortConfig?.key !== k) return <ChevronDown size={14} color="#ccc" />;
-    return sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />;
-  };
-
-  const toggleReadStatus = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const email = emails.find(em => em.id === id);
-    if (!email) return;
-
-    const isCurrentlyRead = email.isRead;
-    setEmails(prev => prev.map(em => em.id === id ? { ...em, isRead: !isCurrentlyRead } : em));
-
-    if (!USE_MOCK) {
-      try {
-        const serverFolder = getServerFolder();
-        if (isCurrentlyRead) {
-          await invoke('remove_email_flags', { account: activeAccount, folder: serverFolder, ids: [id], flags: ["Seen"] });
-        } else {
-          await invoke('add_email_flags', { account: activeAccount, folder: serverFolder, ids: [id], flags: ["Seen"] });
-        }
-      } catch (err) {
-        console.error("Flag update failed", err);
-        setEmails(prev => prev.map(em => em.id === id ? { ...em, isRead: isCurrentlyRead } : em));
-      }
-    }
-  };
-
-  const toggleFlagStatus = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const email = emails.find(em => em.id === id);
-    if (!email) return;
-
-    const isCurrentlyFlagged = email.isFlagged;
-    setEmails(prev => prev.map(em => em.id === id ? { ...em, isFlagged: !isCurrentlyFlagged } : em));
-
-    if (!USE_MOCK) {
-      try {
-        const serverFolder = getServerFolder();
-        if (isCurrentlyFlagged) {
-          await invoke('remove_email_flags', { account: activeAccount, folder: serverFolder, ids: [id], flags: ["Flagged"] });
-        } else {
-          await invoke('add_email_flags', { account: activeAccount, folder: serverFolder, ids: [id], flags: ["Flagged"] });
-        }
-      } catch (err) {
-        console.error("Flag update failed", err);
-        setEmails(prev => prev.map(em => em.id === id ? { ...em, isFlagged: isCurrentlyFlagged } : em));
-      }
-    }
-  };
-
-  const deleteEmail = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setEmails(prev => prev.map(em => em.id === id ? { ...em, isDeleted: true } : em));
-    if (readingEmail?.id === id) setReadingEmail(null);
-
-    if (!USE_MOCK) {
-      try {
-        await invoke('delete_emails', { account: activeAccount, folder: getServerFolder(), ids: [id] });
-      } catch (err) {
-        console.error("Delete failed", err);
-        alert(`削除に失敗しました: ${err}`);
-        setEmails(prev => prev.map(em => em.id === id ? { ...em, isDeleted: false } : em));
-      }
-    }
-  };
-
-  const handleBulkAction = async (action: 'read' | 'delete') => {
-    const idsToUpdate = [...selectedIds];
-    if (idsToUpdate.length === 0) return;
-
-    if (action === 'read') {
-      setEmails(prev => prev.map(em => idsToUpdate.includes(em.id) ? { ...em, isRead: true } : em));
-      setSelectedIds([]);
-      if (!USE_MOCK) {
-        try {
-          await invoke('add_email_flags', { account: activeAccount, folder: getServerFolder(), ids: idsToUpdate, flags: ["Seen"] });
-        } catch (e) { console.error("Bulk read failed", e); }
-      }
-    } else {
-      setEmails(prev => prev.map(em => idsToUpdate.includes(em.id) ? { ...em, isDeleted: true } : em));
-      setSelectedIds([]);
-      if (!USE_MOCK) {
-        try {
-          await invoke('delete_emails', { account: activeAccount, folder: getServerFolder(), ids: idsToUpdate });
-        } catch (e) {
-          console.error("Bulk delete failed", e);
-          alert(`削除に失敗しました: ${e}`);
-          setEmails(prev => prev.map(em => idsToUpdate.includes(em.id) ? { ...em, isDeleted: false } : em));
-        }
-      }
-    }
+    if (emailHook.sortConfig?.key !== k) return <ChevronDown size={14} color="#ccc" />;
+    return emailHook.sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />;
   };
 
   return (
@@ -734,11 +511,11 @@ function App() {
 
       <Sidebar
         activeFolder={activeFolder}
-        currentDisplayCount={currentDisplayCount}
+        currentDisplayCount={emailHook.currentDisplayCount}
         isDarkMode={isDarkMode}
         onSelectFolder={(folderName) => {
           setActiveFolder(folderName);
-          setCurrentPage(0);
+          emailHook.setCurrentPage(0);
           setReadingEmail(null);
           setIsDrawerOpen(false);
         }}
@@ -781,30 +558,30 @@ function App() {
             {/* ✨ 巨大なベタ書きの代わりに、この1行を身代わりに置きます */}
             <EmailList
               activeFolder={activeFolder}
-              isRefreshing={isRefreshing}
-              searchQuery={searchQuery}
-              filterUnread={filterUnread}
-              selectedIds={selectedIds}
-              filteredAndSortedEmails={filteredAndSortedEmails}
+              isRefreshing={emailHook.isRefreshing}
+              searchQuery={emailHook.searchQuery}
+              filterUnread={emailHook.filterUnread}
+              selectedIds={emailHook.selectedIds}
+              filteredAndSortedEmails={emailHook.filteredAndSortedEmails}
               readingEmail={readingEmail}
-              currentPage={currentPage}
-              PAGE_SIZE={PAGE_SIZE}
-              currentDisplayCount={currentDisplayCount}
-              hasMore={hasMore}
-              sortConfig={sortConfig}
+              currentPage={emailHook.currentPage}
+              PAGE_SIZE={emailHook.PAGE_SIZE}
+              currentDisplayCount={emailHook.currentDisplayCount}
+              hasMore={emailHook.hasMore}
+              sortConfig={emailHook.sortConfig}
               getFolderDisplayLabel={getFolderDisplayLabel}
-              fetchEmails={fetchEmails}
-              setSearchQuery={setSearchQuery}
-              setFilterUnread={setFilterUnread}
-              setSelectedIds={setSelectedIds}
-              handleBulkAction={handleBulkAction}
-              setSortConfig={setSortConfig}
+              fetchEmails={emailHook.fetchEmails}
+              setSearchQuery={emailHook.setSearchQuery}
+              setFilterUnread={emailHook.setFilterUnread}
+              setSelectedIds={emailHook.setSelectedIds}
+              handleBulkAction={emailHook.handleBulkAction}
+              setSortConfig={emailHook.setSortConfig}
               renderSortIcon={renderSortIcon}
               handleSelectEmail={handleSelectEmail}
-              toggleFlagStatus={toggleFlagStatus}
+              toggleFlagStatus={emailHook.toggleFlagStatus}
               handlePreviewEmail={handlePreviewEmail}
-              toggleReadStatus={toggleReadStatus}
-              deleteEmail={deleteEmail}
+              toggleReadStatus={emailHook.toggleReadStatus}
+              deleteEmail={(id, e) => emailHook.deleteEmail(id, e, readingEmail?.id === id, () => setReadingEmail(null))}
             />
 
             {/* ⚠️ aside（ドロワー）のこのブロックだけは、App.tsx側にまだ残しておきます */}
@@ -961,10 +738,10 @@ function App() {
           handleComposeSend={handleComposeSend}
         />
 
-        {(isRefreshing || isSending || isComposeSending || isDownloading || successMessage || errorMessage) && (
+        {(emailHook.isRefreshing || isSending || isComposeSending || isDownloading || successMessage || errorMessage) && (
           <div className="global-loading-overlay" style={{ zIndex: 1100 }}>
             <div className="global-loading-content">
-              {(isRefreshing || isSending || isComposeSending || isDownloading) && <RefreshCw size={48} className="spin global-loading-spinner" />}
+              {(emailHook.isRefreshing || isSending || isComposeSending || isDownloading) && <RefreshCw size={48} className="spin global-loading-spinner" />}
               <div className="global-loading-text">{successMessage || errorMessage || '処理中...'}</div>
             </div>
           </div>
