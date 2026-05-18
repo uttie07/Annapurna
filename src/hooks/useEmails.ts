@@ -1,42 +1,173 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 
 // 💡 モック環境でテスト・画面改善を行う場合は true、実サーバーに繋ぐ場合は false
-const USE_MOCK = false
+const USE_MOCK = false;
 const PAGE_SIZE = 50;
 
+/**
+ * メールデータのオブジェクト構造定義
+ */
 type Email = {
-  id: string; subject: string; from: string; to?: string; email_address: string; date: string; snippet: string;
-  body: string; aiCategories: string[]; account: string;
-  isRead: boolean; isFlagged: boolean; isAnswered: boolean; isDraft: boolean; isDeleted: boolean;
+  id: string;
+  subject: string;
+  from: string;
+  to?: string;
+  email_address: string;
+  date: string;
+  snippet: string;
+  body: string;
+  aiCategories: string[];
+  account: string;
+  isRead: boolean;
+  isFlagged: boolean;
+  isAnswered: boolean;
+  isDraft: boolean;
+  isDeleted: boolean;
   attachmentsList?: string[];
 };
 
-type SortConfig = { key: keyof Email; direction: 'asc' | 'desc'; } | null;
+/**
+ * ソート設定の型定義
+ */
+type SortConfig = {
+  key: keyof Email;
+  direction: 'asc' | 'desc';
+} | null;
 
-// 外部から現在選択中のアカウント名とフォルダ名をもらう
+/**
+ * useEmails カスタムフックへの入力引数の型定義
+ */
 interface UseEmailsProps {
+  /** 現在アクティブに切り替えられているアカウント識別名 */
   activeAccount: string;
+  /** 現在選択されているフォルダ識別名 */
   activeFolder: string;
 }
 
-export function useEmails({ activeAccount, activeFolder }: UseEmailsProps) {
+/**
+ * Tauri バックエンドからの get_emails レスポンスの型定義
+ */
+interface GetEmailsResponse {
+  emails: Array<{
+    id: number | string;
+    subject?: string;
+    from: string;
+    to?: string;
+    date: string;
+    flags?: string[];
+  }>;
+  totalCount: number;
+}
+
+/**
+ * useEmails カスタムフックの戻り値（外部へ公開するインターフェース）型定義
+ */
+interface UseEmailsReturn {
+  /** フェッチされたメールデータの全配列（フィルタ前のマスタ） */
+  emails: Email[];
+  /** メールデータマスタを更新するセッター関数 */
+  setEmails: React.Dispatch<React.SetStateAction<Email[]>>;
+  /** 現在適用されているソートの設定情報 */
+  sortConfig: SortConfig;
+  /** ソート設定を更新するセッター関数 */
+  setSortConfig: (config: SortConfig) => void;
+  /** チェックボックスで一括選択されているメールIDの配列 */
+  selectedIds: string[];
+  /** 一括選択のID配列を更新するセッター関数 */
+  setSelectedIds: React.Dispatch<React.SetStateAction<string[]>>;
+  /** 同期・再取得が実行中かどうかのローディングフラグ */
+  isRefreshing: boolean;
+  /** 検索バーに入力されている文字列のState */
+  searchQuery: string;
+  /** 検索文字列を更新するセッター関数 */
+  setSearchQuery: (query: string) => void;
+  /** 未読メールのみに絞り込むかどうかのフラグState */
+  filterUnread: boolean;
+  /** 未読フィルタの状態を反転・更新するセッター関数 */
+  setFilterUnread: (filter: boolean) => void;
+  /** ページネーションの現在ページ番号（0スタート） */
+  currentPage: number;
+  /** 現在ページ番号を更新するセッター関数 */
+  setCurrentPage: (page: number) => void;
+  /** 次のページのデータがサーバー側に存在するかどうかのフラグ */
+  hasMore: boolean;
+  /** hasMore の状態を更新するセッター関数 */
+  setHasMore: (more: boolean) => void;
+  /** 1ページあたりの最大表示レコード定数（50固定） */
+  PAGE_SIZE: number;
+  /** 現在の検索・フォルダ・未読フィルタ・ソートをすべて適用した、画面にループ描画すべきメール配列 */
+  filteredAndSortedEmails: Email[];
+  /** 画面下部のフッターに表示する、現在の累積表示件数 */
+  currentDisplayCount: number;
+  /** 現在のアクティブフォルダに対応する、サーバー（IMAP）側の物理フォルダ名（"INBOX" 等）を返す関数 */
+  getServerFolder: () => string;
+  /**
+   * サーバーまたはモックから指定されたページのメール一覧を非同期フェッチする関数
+   * @param page 取得対象のページ番号（0スタート）
+   */
+  fetchEmails: (page?: number) => Promise<void>;
+  /**
+   * 特定のメールの既読 / 未読状態を反転させ、サーバーの "Seen" フラグを同期する関数
+   * @param id 対象のメールID
+   * @param e イベント伝播を抑制するためのマウスイベント
+   */
+  toggleReadStatus: (id: string, e: React.MouseEvent) => Promise<void>;
+  /**
+   * 特定のメールの星付き（フラグ）状態を反転させ、サーバーの "Flagged" フラグを同期する関数
+   * @param id 対象のメールID
+   * @param e イベント伝播を抑制するためのマウスイベント
+   */
+  toggleFlagStatus: (id: string, e: React.MouseEvent) => Promise<void>;
+  /**
+   * 特定のメールをゴミ箱へ移動（または削除）し、詳細画面の選択をクリアする関数
+   * @param id 対象のメールID
+   * @param e イベント伝播を抑制するためのマウスイベント
+   * @param isReading 現在削除対象のメールを開いているかどうかのフラグ
+   * @param setReadingNull 開いている詳細表示を閉じるためのコールバック関数
+   */
+  deleteEmail: (id: string, e: React.MouseEvent, isReading: boolean, setReadingNull: () => void) => Promise<void>;
+  /**
+   * チェックボックスで選択された全メールに対して、一括既読化または一括削除をバッチ実行する関数
+   * @param action 実行したい操作の識別子 ('read' | 'delete')
+   */
+  handleBulkAction: (action: 'read' | 'delete') => Promise<void>;
+  /** From等の複雑なRFC文字列から、表示用の純粋な「差出人氏名」のみをパースする関数 */
+  formatSenderName: (fromStr: string) => string;
+  /** From等の複雑なRFC文字列から、`<...>` に囲まれた純粋な「メールアドレス」のみをパースする関数 */
+  extractEmailAddress: (fromStr: string) => string;
+  /** ISO 8601等形式の時刻文字列を、画面表示用に 「YYYY-MM-DD HH:mm」へ成形する関数 */
+  formatEmailDate: (dateStr: string) => string;
+}
+
+/**
+ * メール一覧の取得・状態管理・検索・フィルタリング、およびバックエンドへのフラグ更新の
+ * すべてのインフラストラクチャロジックを統括する、アプリケーションのコア・カスタムフック。
+ * @returns 画面コンポーネント（EmailList, EmailDetail等）へ受け渡す全データとコールバック
+ */
+export function useEmails({ activeAccount, activeFolder }: UseEmailsProps): UseEmailsReturn {
   const [emails, setEmails] = useState<Email[]>([]);
   const [sortConfig, setSortConfig] = useState<SortConfig>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterUnread, setFilterUnread] = useState(false);
-  const [currentPage, setCurrentPage] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [filterUnread, setFilterUnread] = useState<boolean>(false);
+  const [currentPage, setCurrentPage] = useState<number>(0);
+  const [hasMore, setHasMore] = useState<boolean>(true);
 
-  const getServerFolder = () => {
+  /**
+   * アクティブなフォルダ名をIMAPの物理フォルダ名にマッピング
+   */
+  const getServerFolder = (): string => {
     if (activeFolder === "sent") return "sent";
     if (activeFolder === "drafts") return "drafts";
     return "INBOX";
   };
 
-  const formatEmailDate = (dateStr: string) => {
+  /**
+   * 時刻のフォーマット成形処理
+   */
+  const formatEmailDate = (dateStr: string): string => {
     if (!dateStr) return '';
     try {
       const d = new Date(dateStr);
@@ -47,22 +178,34 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps) {
       const hh = String(d.getHours()).padStart(2, '0');
       const mm = String(d.getMinutes()).padStart(2, '0');
       return `${y}-${m}-${day} ${hh}:${mm}`;
-    } catch (e) { return dateStr; }
+    } catch {
+      return dateStr;
+    }
   };
 
-  const formatSenderName = (fromStr: string) => {
+  /**
+   * 送信元氏名の切り出しパース
+   */
+  const formatSenderName = (fromStr: string): string => {
     if (!fromStr) return '不明な宛先/送信元';
     const match = fromStr.match(/^"?([^"<]+)"?\s*<.*>$/) || fromStr.match(/^([^<]+)/);
     return match && match[1] ? match[1].trim() : fromStr;
   };
 
-  const extractEmailAddress = (fromStr: string) => {
+  /**
+   * メールアドレスの抽出パース
+   */
+  const extractEmailAddress = (fromStr: string): string => {
     if (!fromStr) return '';
     const match = fromStr.match(/<([^>]+)>/);
     return match ? match[1] : fromStr;
   };
 
-  const fetchEmails = async (page: number = 0) => {
+  /**
+   * 指定されたページのメール一覧をフェッチする非同期コア関数
+   * ✨ useCallback で囲むことで関数の再生成を防ぎ、無限ループを完璧に防止します
+   */
+  const fetchEmails = useCallback(async (page: number = 0): Promise<void> => {
     if (!activeAccount) return;
     const targetPage = Math.max(0, page);
     setIsRefreshing(true);
@@ -71,7 +214,12 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps) {
 
     if (isTauri) {
       try {
-        const response = await invoke('get_emails', { account: activeAccount, folder: serverFolder, page: targetPage, pageSize: PAGE_SIZE }) as { emails: any[], totalCount: number };
+        const response = await invoke<GetEmailsResponse>('get_emails', {
+          account: activeAccount,
+          folder: serverFolder,
+          page: targetPage,
+          pageSize: PAGE_SIZE
+        });
 
         const realEmails: Email[] = response.emails.map((e) => {
           const flags: string[] = e.flags || [];
@@ -97,57 +245,95 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps) {
         setEmails(realEmails);
         setCurrentPage(targetPage);
         setHasMore(realEmails.length === PAGE_SIZE);
-      } catch (e) {
-        console.error("Fetch error:", e);
+      } catch (error) {
+        console.error("Fetch error:", error);
       } finally {
         setIsRefreshing(false);
       }
     } else {
+      // ➔ モック環境（テスト用データフォールバック）
       await new Promise(resolve => setTimeout(resolve, 500));
       const mockData: Email[] = [
-        { id: "1", account: "work", subject: "ダミーのメール", from: "管理者", email_address: "admin@example.com", date: formatEmailDate(new Date().toISOString()), snippet: "", body: "", aiCategories: ["重要"], isRead: false, isFlagged: true, isAnswered: false, isDraft: false, isDeleted: false },
+        {
+          id: "1",
+          account: activeAccount,
+          subject: `${activeAccount}アカウントのダミーメール`,
+          from: "Annapurna サポート",
+          email_address: "support@example.com",
+          date: formatEmailDate(new Date().toISOString()),
+          snippet: "クリーンアップ検証用のダミーテキストです。",
+          body: "<div>フックのリファクタリングが成功しています。</div>",
+          aiCategories: ["重要"],
+          isRead: false,
+          isFlagged: true,
+          isAnswered: false,
+          isDraft: false,
+          isDeleted: false
+        },
       ];
-      setEmails(mockData.filter(m => m.account === activeAccount));
+      setEmails(mockData);
       setCurrentPage(targetPage);
       setHasMore(false);
       setIsRefreshing(false);
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeAccount, activeFolder]); // 👈 依存する外部状態を記述
 
-  useEffect(() => { fetchEmails(0); }, [activeAccount, activeFolder]);
+  // ✨ アカウントまたはフォルダが切り替わったら、自動的に0ページ目から再読み込み
+  useEffect(() => {
+    fetchEmails(0);
+  }, [fetchEmails]);
 
+  /**
+   * メモリ上で検索クエリ、フォルダ分類、未読チェック、ソートを高速適用する算出プロパティ
+   */
   const filteredAndSortedEmails = useMemo(() => {
     let result = emails.filter(e => e.account === activeAccount);
-    if (activeFolder === 'urgent') result = result.filter(e => e.aiCategories.includes("重要") || e.aiCategories.includes("至急"));
-    else if (activeFolder === 'flagged') result = result.filter(e => e.isFlagged && !e.isDeleted);
-    else if (activeFolder === 'drafts') result = result.filter(e => !e.isDeleted);
-    if (filterUnread) result = result.filter(e => !e.isRead);
+
+    if (activeFolder === 'urgent') {
+      result = result.filter(e => e.aiCategories.includes("重要") || e.aiCategories.includes("至急"));
+    } else if (activeFolder === 'flagged') {
+      result = result.filter(e => e.isFlagged && !e.isDeleted);
+    } else if (activeFolder === 'drafts') {
+      result = result.filter(e => !e.isDeleted);
+    }
+
+    if (filterUnread) {
+      result = result.filter(e => !e.isRead);
+    }
 
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       result = result.filter(e =>
-        e.subject.toLowerCase().includes(q) ||
-        e.from.toLowerCase().includes(q) ||
-        (e.email_address && e.email_address.toLowerCase().includes(q))
+          e.subject.toLowerCase().includes(q) ||
+          e.from.toLowerCase().includes(q) ||
+          (e.email_address && e.email_address.toLowerCase().includes(q))
       );
     }
 
     if (sortConfig) {
       result.sort((a, b) => {
-        const aVal = String(a[sortConfig.key]); const bVal = String(b[sortConfig.key]);
+        const aVal = String(a[sortConfig.key]);
+        const bVal = String(b[sortConfig.key]);
         return sortConfig.direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
       });
     }
     return result.filter(e => !e.isDeleted);
   }, [emails, activeAccount, activeFolder, searchQuery, filterUnread, sortConfig]);
 
+  /**
+   * フッター用の表示レコード件数の算出
+   */
   const currentDisplayCount = useMemo(() => {
     return filteredAndSortedEmails.length > 0
-      ? currentPage * PAGE_SIZE + filteredAndSortedEmails.length
-      : 0;
+        ? currentPage * PAGE_SIZE + filteredAndSortedEmails.length
+        : 0;
   }, [currentPage, filteredAndSortedEmails.length]);
 
-  const toggleReadStatus = async (id: string, e: React.MouseEvent) => {
+  /**
+   * 既読・未読フラグのトグル処理
+   */
+  const toggleReadStatus = async (id: string, e: React.MouseEvent): Promise<void> => {
     e.stopPropagation();
     const email = emails.find(em => em.id === id);
     if (!email) return;
@@ -163,14 +349,18 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps) {
         } else {
           await invoke('add_email_flags', { account: activeAccount, folder: serverFolder, ids: [id], flags: ["Seen"] });
         }
-      } catch (err) {
-        console.error("Flag update failed", err);
+      } catch (error) {
+        console.error("Flag update failed", error);
+        // ロールバック（エラー時は元の状態に戻す）
         setEmails(prev => prev.map(em => em.id === id ? { ...em, isRead: isCurrentlyRead } : em));
       }
     }
   };
 
-  const toggleFlagStatus = async (id: string, e: React.MouseEvent) => {
+  /**
+   * 星付きフラグのトグル処理
+   */
+  const toggleFlagStatus = async (id: string, e: React.MouseEvent): Promise<void> => {
     e.stopPropagation();
     const email = emails.find(em => em.id === id);
     if (!email) return;
@@ -186,14 +376,18 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps) {
         } else {
           await invoke('add_email_flags', { account: activeAccount, folder: serverFolder, ids: [id], flags: ["Flagged"] });
         }
-      } catch (err) {
-        console.error("Flag update failed", err);
+      } catch (error) {
+        console.error("Flag update failed", error);
+        // ロールバック
         setEmails(prev => prev.map(em => em.id === id ? { ...em, isFlagged: isCurrentlyFlagged } : em));
       }
     }
   };
 
-  const deleteEmail = async (id: string, e: React.MouseEvent, isReading: boolean, setReadingNull: () => void) => {
+  /**
+   * 単一メールの削除（ゴミ箱移動）処理
+   */
+  const deleteEmail = async (id: string, e: React.MouseEvent, isReading: boolean, setReadingNull: () => void): Promise<void> => {
     e.stopPropagation();
     setEmails(prev => prev.map(em => em.id === id ? { ...em, isDeleted: true } : em));
     if (isReading) setReadingNull();
@@ -201,15 +395,18 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps) {
     if (!USE_MOCK) {
       try {
         await invoke('delete_emails', { account: activeAccount, folder: getServerFolder(), ids: [id] });
-      } catch (err) {
-        console.error("Delete failed", err);
-        alert(`削除に失敗しました: ${err}`);
+      } catch (error) {
+        console.error("Delete failed", error);
+        alert(`削除に失敗しました: ${error}`);
         setEmails(prev => prev.map(em => em.id === id ? { ...em, isDeleted: false } : em));
       }
     }
   };
 
-  const handleBulkAction = async (action: 'read' | 'delete') => {
+  /**
+   * チェックボックス選択された複数アイテムの一括バッチ処理
+   */
+  const handleBulkAction = async (action: 'read' | 'delete'): Promise<void> => {
     const idsToUpdate = [...selectedIds];
     if (idsToUpdate.length === 0) return;
 
@@ -219,7 +416,9 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps) {
       if (!USE_MOCK) {
         try {
           await invoke('add_email_flags', { account: activeAccount, folder: getServerFolder(), ids: idsToUpdate, flags: ["Seen"] });
-        } catch (e) { console.error("Bulk read failed", e); }
+        } catch (error) {
+          console.error("Bulk read failed", error);
+        }
       }
     } else {
       setEmails(prev => prev.map(em => idsToUpdate.includes(em.id) ? { ...em, isDeleted: true } : em));
@@ -227,9 +426,9 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps) {
       if (!USE_MOCK) {
         try {
           await invoke('delete_emails', { account: activeAccount, folder: getServerFolder(), ids: idsToUpdate });
-        } catch (e) {
-          console.error("Bulk delete failed", e);
-          alert(`削除に失敗しました: ${e}`);
+        } catch (error) {
+          console.error("Bulk delete failed", error);
+          alert(`削除に失敗しました: ${error}`);
           setEmails(prev => prev.map(em => idsToUpdate.includes(em.id) ? { ...em, isDeleted: false } : em));
         }
       }
