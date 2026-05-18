@@ -14,6 +14,7 @@ import { EmailList } from './components/EmailList';
 import { EmailDetail } from './components/EmailDetail';
 import { ComposeModal } from './components/ComposeModal';
 import { AddAccountModal } from './components/AddAccountModal';
+import { useGemini } from './hooks/useGemini';
 import './App.css';
 
 // 💡 モック環境でテスト・画面改善を行う場合は true、実サーバーに繋ぐ場合は false
@@ -40,6 +41,7 @@ type InsightData = {
 };
 
 function App() {
+  const gemini = useGemini();
   const [emails, setEmails] = useState<Email[]>([]);
   const [sortConfig, setSortConfig] = useState<SortConfig>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -68,17 +70,10 @@ function App() {
   const [isLoadingDraft, setIsLoadingDraft] = useState(false);
 
   const [showReplyForm, setShowReplyForm] = useState(false);
-  const [replyText, setReplyText] = useState('');
   const [replyType, setReplyType] = useState<'reply' | 'replyAll'>('reply');
   const [replyCc, setReplyCc] = useState('');
   const [replyBcc, setReplyBcc] = useState('');
   const [showReplyCcBcc, setShowReplyCcBcc] = useState(false);
-
-  const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('geminiApiKey') || '');
-  const [showSettings, setShowSettings] = useState(false);
-  const [isAnalyzingInsight, setIsAnalyzingInsight] = useState(false);
-  const [insightData, setInsightData] = useState<InsightData | null>(null);
-  const [isGeneratingReply, setIsGeneratingReply] = useState(false);
 
   const [isAddAccountOpen, setIsAddAccountOpen] = useState(false);
   const [newAccName, setNewAccName] = useState('');
@@ -133,10 +128,6 @@ function App() {
     loadConfigAccounts();
   }, []);
 
-  const saveApiKey = (key: string) => {
-    setGeminiApiKey(key);
-    localStorage.setItem('geminiApiKey', key);
-  };
 
   const getServerFolder = () => {
     if (activeFolder === "sent") return "sent";
@@ -226,104 +217,22 @@ function App() {
 
   useEffect(() => { fetchEmails(0); }, [activeAccount, activeFolder]);
 
-  const analyzeEmailWithGemini = async (email: Email, bodyContent: string) => {
-    if (!geminiApiKey) {
-      setInsightData({ aiScore: 0, summary: "APIキーが設定されていません。左下の歯車アイコンからGemini APIキーを登録してください。", actions: [] });
-      return;
-    }
-
-    setIsAnalyzingInsight(true);
-    try {
-      const tempDiv = document.createElement("div");
-      tempDiv.innerHTML = bodyContent;
-      const plainText = (tempDiv.innerText || tempDiv.textContent || "").substring(0, 3000);
-
-      const prompt = `以下のメールを解析し、JSON形式で結果を返してください。\nフォーマット:\n{\n  "aiScore": number (0-100で、対応の緊急度や重要度を示すスコア),\n  "summary": string (メールの要旨を3行程度の箇条書き、または短いテキストで),\n  "actions": string[] (受信者が次にとるべき具体的なアクションのリスト。無ければ空配列)\n}\n\n差出人: ${email.from}\n件名: ${email.subject}\n本文:\n${plainText}`;
-
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: "application/json" }
-        })
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message || `API Error: ${res.status}`);
-
-      const text = data.candidates[0].content.parts[0].text;
-      const cleanText = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-
-      try {
-        const parsed: InsightData = JSON.parse(cleanText);
-        setInsightData(parsed);
-      } catch (parseError) {
-        console.error("JSON parse failed. Raw response from Gemini:", text);
-        throw new Error("解析結果の読み取りに失敗しました。");
-      }
-
-    } catch (e: any) {
-      console.error("Gemini API Error:", e);
-      setInsightData({ aiScore: 0, summary: `エラーが発生しました: ${e.message}`, actions: [] });
-    } finally {
-      setIsAnalyzingInsight(false);
-    }
-  };
-
   const handlePreviewEmail = async (email: Email) => {
     setPreviewEmail(email);
-    setInsightData(null);
+    gemini.setInsightData(null);
     setIsDrawerOpen(true);
 
     const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
     if (isTauri) {
-      setIsAnalyzingInsight(true);
+      gemini.setIsAnalyzingInsight(true);
       try {
         const serverFolder = getServerFolder();
         const contentResponse = await invoke<EmailDetailResponse>('get_email_content', { account: activeAccount, folder: serverFolder, id: email.id });
-        await analyzeEmailWithGemini(email, contentResponse.body);
+        await gemini.analyzeEmailWithGemini(email, contentResponse.body);
       } catch (e) {
-        setIsAnalyzingInsight(false);
-        setInsightData({ aiScore: 0, summary: "本文の取得に失敗したため解析できませんでした。", actions: [] });
+        gemini.setIsAnalyzingInsight(false);
+        gemini.setInsightData({ aiScore: 0, summary: "本文の取得に失敗したため解析できませんでした。", actions: [] });
       }
-    }
-  };
-
-  const generateAiReply = async (intent: string) => {
-    if (!geminiApiKey) {
-      alert("AI機能を使用するには、左下の設定からGemini APIキーを登録してください。");
-      setShowSettings(true);
-      return;
-    }
-    if (!readingEmail) return;
-
-    setIsGeneratingReply(true);
-    try {
-      const tempDiv = document.createElement("div");
-      tempDiv.innerHTML = readingEmail.body;
-      const plainText = (tempDiv.innerText || tempDiv.textContent || "").substring(0, 3000);
-
-      const prompt = `以下の受信メールに対して、「${intent}」という意図で返信文（ビジネスメール）の草案を作成してください。\n出力は件名や宛名・署名のプレースホルダーを含めず、**「本文のみのプレーンテキスト」**で出力してください。\n\n差出人: ${readingEmail.from}\n件名: ${readingEmail.subject}\n本文:\n${plainText}`;
-
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }]
-        })
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message || `API Error: ${res.status}`);
-
-      const generatedText = data.candidates[0].content.parts[0].text;
-      setReplyText(generatedText.trim() + "\n\n" + replyText);
-    } catch (e: any) {
-      console.error("AI Reply Generation Error:", e);
-      alert(`AIによる返信文の生成に失敗しました。\n詳細: ${e.message}`);
-    } finally {
-      setIsGeneratingReply(false);
     }
   };
 
@@ -331,7 +240,7 @@ function App() {
     setIsDrawerOpen(false);
 
     if (readingEmail?.id !== email.id && previewEmail?.id !== email.id) {
-      setInsightData(null);
+      gemini.setInsightData(null);
     }
 
     if (activeFolder === 'drafts') {
@@ -375,7 +284,7 @@ function App() {
 
     setReadingEmail(email);
     setIsReadingContent(true);
-    setReplyText('');
+    gemini.setReplyText('');
     setReplyCc('');
     setReplyBcc('');
     setShowReplyCcBcc(false);
@@ -447,12 +356,12 @@ function App() {
   const handleSetReplyType = (type: 'reply' | 'replyAll') => {
     setReplyType(type);
 
-    if (!replyText.trim() && readingEmail) {
+    if (!gemini.replyText.trim() && readingEmail) {
       const tempDiv = document.createElement("div");
       tempDiv.innerHTML = readingEmail.body;
       const plainText = tempDiv.innerText || tempDiv.textContent || "";
       const quote = `\n\n\n--- 引用 ---\n${readingEmail.date} ${readingEmail.from} wrote:\n> ${plainText.split(/\r?\n/).join('\n> ')}`;
-      setReplyText(quote);
+      gemini.setReplyText(quote);
     }
 
     if (type === 'replyAll' && readingEmail?.to) {
@@ -464,7 +373,7 @@ function App() {
   };
 
   const handleSendReply = async () => {
-    if (!readingEmail || !replyText.trim()) return;
+    if (!readingEmail || !gemini.replyText.trim()) return;
     setIsSending(true);
 
     try {
@@ -478,7 +387,7 @@ function App() {
         cc: replyCc || null,
         bcc: replyBcc || null,
         subject: subject,
-        body: replyText
+        body: gemini.replyText
       });
 
       setIsSending(false);
@@ -486,7 +395,7 @@ function App() {
 
       setTimeout(() => {
         setSuccessMessage(null);
-        setReplyText('');
+        gemini.setReplyText('');
         setShowReplyForm(false);
         setReadingEmail(null);
       }, 1500);
@@ -834,7 +743,7 @@ function App() {
           setIsDrawerOpen(false);
         }}
         onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
-        onOpenSettings={() => setShowSettings(true)}
+        onOpenSettings={() => gemini.setShowSettings(true)}
       />
 
       <div className="main-content" style={{ position: 'relative' }}>
@@ -842,20 +751,20 @@ function App() {
           <EmailDetail
             readingEmail={readingEmail}
             isSearchingServer={isSearchingServer}
-            insightData={insightData}
-            isAnalyzingInsight={isAnalyzingInsight}
+            insightData={gemini.insightData}
+            isAnalyzingInsight={gemini.isAnalyzingInsight}
             isReadingContent={isReadingContent}
             showReplyForm={showReplyForm}
             replyType={replyType}
             showReplyCcBcc={showReplyCcBcc}
             replyCc={replyCc}
             replyBcc={replyBcc}
-            replyText={replyText}
+            replyText={gemini.replyText}
             isSending={isSending}
-            isGeneratingReply={isGeneratingReply}
+            isGeneratingReply={gemini.isGeneratingReply}
             setReadingEmail={setReadingEmail}
-            setInsightData={setInsightData}
-            analyzeEmailWithGemini={analyzeEmailWithGemini}
+            setInsightData={gemini.setInsightData}
+            analyzeEmailWithGemini={gemini.analyzeEmailWithGemini}
             handleServerSearch={handleServerSearch}
             handleDownloadAttachment={handleDownloadAttachment}
             setShowReplyForm={setShowReplyForm}
@@ -863,8 +772,8 @@ function App() {
             setShowReplyCcBcc={setShowReplyCcBcc}
             setReplyCc={setReplyCc}
             setReplyBcc={setReplyBcc}
-            generateAiReply={generateAiReply}
-            setReplyText={setReplyText}
+            generateAiReply={(intent) => gemini.generateAiReply(readingEmail, intent)}
+            setReplyText={gemini.setReplyText}
             handleSendReply={handleSendReply}
           />
         ) : (
@@ -915,27 +824,27 @@ function App() {
                       From: {previewEmail.from}
                     </div>
 
-                    {isAnalyzingInsight ? (
+                    {gemini.isAnalyzingInsight ? (
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 0', color: '#8b5cf6' }}>
                         <RefreshCw size={32} className="spin" style={{ marginBottom: '16px' }} />
                         <span style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>Gemini がメールを解析中...</span>
                       </div>
-                    ) : insightData ? (
+                    ) : gemini.insightData ? (
                       <>
                         <div className="insight-card">
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: insightData.aiScore > 70 ? '#ef4444' : '#2563eb', marginBottom: 8 }}>
-                            <Zap size={16} /> <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>重要度スコア: {insightData.aiScore}点</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: gemini.insightData.aiScore > 70 ? '#ef4444' : '#2563eb', marginBottom: 8 }}>
+                            <Zap size={16} /> <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>重要度スコア: {gemini.insightData.aiScore}点</span>
                           </div>
                           <p style={{ fontSize: '0.9rem', margin: 0, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-                            {insightData.summary}
+                            {gemini.insightData.summary}
                           </p>
                         </div>
 
-                        {insightData.actions && insightData.actions.length > 0 && (
+                        {gemini.insightData.actions && gemini.insightData.actions.length > 0 && (
                           <div className="ai-section" style={{ marginBottom: 24 }}>
                             <div className="ai-section-title" style={{ marginBottom: 12 }}>予測されるアクション</div>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                              {insightData.actions.map((action, idx) => (
+                              {gemini.insightData.actions.map((action, idx) => (
                                 <span key={idx} className="badge badge-update" style={{ padding: '6px 12px', borderRadius: '6px' }}>{action}</span>
                               ))}
                             </div>
@@ -1011,7 +920,7 @@ function App() {
           handleAddAccountSubmit={handleAddAccountSubmit}
         />
 
-        {showSettings && (
+        {gemini.showSettings && (
           <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)', zIndex: 2000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
             <div style={{ width: '450px', backgroundColor: 'var(--bg-main)', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}><Settings size={20} /> 設定</h3>
@@ -1020,8 +929,8 @@ function App() {
                 <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '8px' }}>Gemini API キー (Google AI Studio)</label>
                 <input
                   type="password"
-                  value={geminiApiKey}
-                  onChange={(e) => setGeminiApiKey(e.target.value)}
+                  value={gemini.geminiApiKey}
+                  onChange={(e) => gemini.setGeminiApiKey(e.target.value)}
                   placeholder="AI_xxxxxxxxxxxxxxxxxxx..."
                   style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }}
                 />
@@ -1031,8 +940,8 @@ function App() {
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '16px' }}>
-                <button onClick={() => setShowSettings(false)} style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-main)', cursor: 'pointer' }}>キャンセル</button>
-                <button onClick={() => { saveApiKey(geminiApiKey); setShowSettings(false); }} className="send-btn" style={{ padding: '8px 16px', borderRadius: '6px' }}>保存して閉じる</button>
+                <button onClick={() => gemini.setShowSettings(false)} style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-main)', cursor: 'pointer' }}>キャンセル</button>
+                <button onClick={() => { gemini.saveApiKey(gemini.geminiApiKey); gemini.setShowSettings(false); }} className="send-btn" style={{ padding: '8px 16px', borderRadius: '6px' }}>保存して閉じる</button>
               </div>
             </div>
           </div>
