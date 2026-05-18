@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 
 // 💡 モック環境でテスト・画面改善を行う場合は true、実サーバーに繋ぐ場合は false
-const USE_MOCK = true;
+const USE_MOCK = false
 const PAGE_SIZE = 50;
 
 type Email = {
