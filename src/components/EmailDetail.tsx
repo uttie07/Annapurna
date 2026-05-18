@@ -80,9 +80,6 @@ interface EmailDetailProps {
   /** 閲覧中のメールオブジェクトを更新（または閉じるために null に）するセッター関数 */
   setReadingEmail: (email: Email | null) => void;
 
-  /** インサイトデータを手動でクリア・更新するためのセッター関数 */
-  setInsightData: (data: InsightData | null) => void;
-
   /**
    * 特定のメールに対して Gemini API を呼び出し、解析を実行する関数
    * @param email 対象のメールオブジェクト
@@ -153,7 +150,6 @@ export function EmailDetail({
                               isSending,
                               isGeneratingReply,
                               setReadingEmail,
-                              setInsightData,
                               analyzeEmailWithGemini,
                               handleServerSearch,
                               handleDownloadAttachment,
