@@ -166,6 +166,11 @@ body {
   opacity: 0.8;
 }
 
+.custom-folders-scroll {
+  overflow-y: auto;
+  max-height: 180px;
+}
+
 .theme-toggle-container {
   margin-top: auto;
   padding: 12px 8px;
@@ -222,7 +227,6 @@ body {
   background-color: var(--bg-main);
 }
 
-/* 検索バーと未読ボタンを横並びにするグループ */
 .search-filter-group {
   display: flex;
   align-items: center;
@@ -263,7 +267,6 @@ body {
   border-color: var(--unread-accent);
 }
 
-/* 検索クリアボタン */
 .search-clear-btn {
   position: absolute;
   right: 8px;
@@ -390,12 +393,13 @@ body {
   border-color: rgba(139, 92, 246, 0.3);
 }
 
-/* --- 6. メールリスト表示（画像の比率に合わせたグリッド修正版） --- */
+/* --- 6. メールリスト表示（6列黄金比グリッド） --- */
 .list-grid-layout {
-  display: grid;
-  grid-template-columns: 48px 40px 140px 1fr 200px 40px 80px;
+  display: grid !important;
+  grid-template-columns: 48px 40px 160px 1fr 180px 100px !important;
   align-items: center;
-  padding: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .list-header {
@@ -411,7 +415,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  padding: 0 12px;
+  padding: 0 8px;
   font-weight: 600;
   height: 100%;
   text-transform: uppercase;
@@ -419,9 +423,7 @@ body {
 }
 
 .list-grid-layout > div:nth-child(1),
-.list-grid-layout > div:nth-child(2),
-.list-grid-layout > div:nth-child(6),
-.list-grid-layout > div:last-child {
+.list-grid-layout > div:nth-child(2) {
   justify-content: center;
   padding: 0;
 }
@@ -441,6 +443,16 @@ body {
   position: relative;
 }
 
+.email-list-item > div {
+  padding: 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+
 .email-list-item.active {
   background-color: var(--item-hover);
   border-left-color: var(--unread-accent);
@@ -453,11 +465,12 @@ body {
 /* --- 7. アクションボタン & ホバー復元 --- */
 .cell-actions-container {
   display: flex;
-  justify-content: center;
+  justify-content: center !important;
   align-items: center;
   position: relative;
   height: 100%;
   width: 100%;
+  padding: 0 !important;
 }
 
 .item-attachment {
@@ -469,9 +482,8 @@ body {
 
 .hover-actions {
   display: none;
-  gap: 4px;
+  gap: 8px;
   background-color: var(--item-hover);
-  padding: 0 4px;
   height: 100%;
   align-items: center;
   justify-content: center;
@@ -492,23 +504,36 @@ body {
 }
 
 .hover-btn {
-  padding: 4px;
-  border-radius: 4px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50% !important;
   color: var(--text-muted);
   background: none;
   border: none;
   cursor: pointer;
   display: flex;
   align-items: center;
-  transition: 0.2s;
+  justify-content: center;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  padding: 0;
 }
 
 .hover-btn:hover {
-  background-color: var(--border-color);
+  background-color: var(--border-color) !important;
   color: var(--text-main);
 }
 
-/* --- 8. セル内スタイル --- */
+.hover-btn:last-child:hover {
+  background-color: #fee2e2 !important;
+  color: #ef4444;
+}
+
+.dark .hover-btn:last-child:hover {
+  background-color: rgba(239, 68, 68, 0.2) !important;
+  color: #f87171;
+}
+
+/* --- 8. セル内スタイル（💡 件名コンテナの要素間隔を調整） --- */
 .cell-checkbox,
 .cell-flag,
 .cell-reply {
@@ -523,51 +548,54 @@ body {
 }
 
 .cell-date {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: var(--text-muted);
-  padding: 0 12px;
+  font-weight: 400;
 }
 
 .cell-from {
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 0 12px;
+  font-weight: 400;
 }
 
+/* 💡 修正：要素同士（未読〇、バッジ、文字）の間隔に程よい空気感を持たせる */
 .cell-subject {
-  display: flex;
+  display: flex !important;
   align-items: center;
-  gap: 8px;
+  gap: 12px !important; /* 各要素の間を12pxに広げて窮屈さを解消 */
   overflow: hidden;
-  padding: 0 12px;
+  padding: 0 8px;
+  height: 100%;
 }
 
 .subject-text {
   font-size: 0.95rem;
   color: var(--text-main);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-weight: 400;
+  font-weight: 500;
 }
 
 .email-list-item.unread {
-  background-color: rgba(37, 99, 235, 0.06);
+  background-color: rgba(37, 99, 235, 0.04);
   border-left-color: var(--unread-accent);
 }
 
-.email-list-item.unread .cell-from,
-.email-list-item.unread .subject-text {
-  font-weight: 700;
-}
-
 .email-list-item.unread .cell-from {
+  font-weight: 700;
   color: var(--text-main);
 }
 
+.email-list-item.unread .subject-text {
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.email-list-item.unread .cell-date {
+  color: var(--text-main);
+  font-weight: 500;
+}
+
+/* 💡 修正：未読ドット自体の右側にも少し余白（4px）を足して、バッジとの衝突を防ぐ */
 .unread-dot {
   width: 8px;
   height: 8px;
@@ -575,6 +603,7 @@ body {
   border-radius: 50%;
   flex-shrink: 0;
   box-shadow: 0 0 6px rgba(37, 99, 235, 0.4);
+  margin-right: 4px; 
 }
 
 /* --- 9. ページネーションバー --- */
@@ -629,7 +658,7 @@ body {
   color: var(--unread-accent);
 }
 
-/* --- 10. メール詳細画面（余白やインライン検索の修正を復旧） --- */
+/* --- 10. メール詳細画面 --- */
 .email-detail-container {
   flex: 1;
   display: flex;
@@ -823,7 +852,6 @@ body {
   background: #4c1d95;
 }
 
-/* フィルタボタン */
 .filter-button {
   background-color: var(--bg-main);
   border: 1px solid var(--border-color);

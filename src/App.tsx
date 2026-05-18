@@ -10,7 +10,8 @@ import {
 } from 'lucide-react';
 import './App.css';
 
-const USE_MOCK = false;
+// 💡 モック環境でテスト・画面改善を行う場合は true、実サーバーに繋ぐ場合は false
+const USE_MOCK = true;
 
 type Email = {
   id: string; subject: string; from: string; to?: string; email_address: string; date: string; snippet: string;
@@ -231,18 +232,7 @@ function App() {
       tempDiv.innerHTML = bodyContent;
       const plainText = (tempDiv.innerText || tempDiv.textContent || "").substring(0, 3000);
 
-      const prompt = `以下のメールを解析し、JSON形式で結果を返してください。
-フォーマット:
-{
-  "aiScore": number (0-100で、対応の緊急度や重要度を示すスコア),
-  "summary": string (メールの要旨を3行程度の箇条書き、または短いテキストで),
-  "actions": string[] (受信者が次にとるべき具体的なアクションのリスト。無ければ空配列)
-}
-
-差出人: ${email.from}
-件名: ${email.subject}
-本文:
-${plainText}`;
+      const prompt = `以下のメールを解析し、JSON形式で結果を返してください。\nフォーマット:\n{\n  "aiScore": number (0-100で、対応の緊急度や重要度を示すスコア),\n  "summary": string (メールの要旨を3行程度の箇条書き、または短いテキストで),\n  "actions": string[] (受信者が次にとるべき具体的なアクションのリスト。無ければ空配列)\n}\n\n差出人: ${email.from}\n件名: ${email.subject}\n本文:\n${plainText}`;
 
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`, {
         method: 'POST',
@@ -284,7 +274,8 @@ ${plainText}`;
     if (isTauri) {
       setIsAnalyzingInsight(true);
       try {
-        const contentResponse = await invoke<EmailDetailResponse>('get_email_content', { account: activeAccount, folder: getServerFolder(), id: email.id });
+        const serverFolder = getServerFolder();
+        const contentResponse = await invoke<EmailDetailResponse>('get_email_content', { account: activeAccount, folder: serverFolder, id: email.id });
         await analyzeEmailWithGemini(email, contentResponse.body);
       } catch (e) {
         setIsAnalyzingInsight(false);
@@ -307,13 +298,7 @@ ${plainText}`;
       tempDiv.innerHTML = readingEmail.body;
       const plainText = (tempDiv.innerText || tempDiv.textContent || "").substring(0, 3000);
 
-      const prompt = `以下の受信メールに対して、「${intent}」という意図で返信文（ビジネスメール）の草案を作成してください。
-出力は件名や宛名・署名のプレースホルダーを含めず、**「本文のみのプレーンテキスト」**で出力してください。
-
-差出人: ${readingEmail.from}
-件名: ${readingEmail.subject}
-本文:
-${plainText}`;
+      const prompt = `以下の受信メールに対して、「${intent}」という意図で返信文（ビジネスメール）の草案を作成してください。\n出力は件名や宛名・署名のプレースホルダーを含めず、**「本文のみのプレーンテキスト」**で出力してください。\n\n差出人: ${readingEmail.from}\n件名: ${readingEmail.subject}\n本文:\n${plainText}`;
 
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`, {
         method: 'POST',
@@ -503,10 +488,7 @@ ${plainText}`;
     } catch (e) {
       setIsSending(false);
       setErrorMessage(`送信に失敗しました: ${e}`);
-
-      setTimeout(() => {
-        setErrorMessage(null);
-      }, 3000);
+      setTimeout(() => setErrorMessage(null), 3000);
     }
   };
 
@@ -633,7 +615,7 @@ ${plainText}`;
         setIsSearchingServer(false);
         setSearchQuery(address);
         setReadingEmail(null);
-      }, 3000);
+      }, 1000);
     }
   };
 
@@ -657,7 +639,6 @@ ${plainText}`;
       });
 
       setSuccessMessage("アカウントを追加しました！");
-
       setNewAccName(''); setNewAccEmail(''); setNewAccPassword('');
       setIsAddAccountOpen(false);
 
@@ -665,7 +646,6 @@ ${plainText}`;
       if (updatedList.includes(newAccName)) {
         setActiveAccount(newAccName);
       }
-
       setTimeout(() => setSuccessMessage(null), 1500);
     } catch (err) {
       alert(`アカウントの追加に失敗しました: ${err}`);
@@ -773,7 +753,6 @@ ${plainText}`;
         await invoke('delete_emails', { account: activeAccount, folder: getServerFolder(), ids: [id] });
       } catch (err) {
         console.error("Delete failed", err);
-        // 💡 修正: 失敗した場合はアラートを出し、状態を元に戻す
         alert(`削除に失敗しました: ${err}`);
         setEmails(prev => prev.map(em => em.id === id ? { ...em, isDeleted: false } : em));
       }
@@ -800,7 +779,6 @@ ${plainText}`;
           await invoke('delete_emails', { account: activeAccount, folder: getServerFolder(), ids: idsToUpdate });
         } catch(e) {
           console.error("Bulk delete failed", e);
-          // 💡 修正: 失敗した場合はアラートを出し、状態を元に戻す
           alert(`削除に失敗しました: ${e}`);
           setEmails(prev => prev.map(em => idsToUpdate.includes(em.id) ? { ...em, isDeleted: false } : em));
         }
@@ -872,7 +850,7 @@ ${plainText}`;
               <div className="email-detail-split" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
                 <div className="email-detail-container" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
                   <div className="detail-toolbar" style={{ flexShrink: 0 }}>
-                    <button className="icon-button" onClick={() => { setReadingEmail(null); setInsightData(null); }} disabled={isSearchingServer}><ArrowLeft size={20} /> 戻る</button>
+                    <button className="icon-button" onClick={() => { setReadingEmail(null); setInsightData(null); }}><ArrowLeft size={20} /> 戻る</button>
                   </div>
 
                   {isSearchingServer ? (
@@ -995,25 +973,19 @@ ${plainText}`;
                           )}
 
                           <div className="detail-body" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0 32px 16px 32px' }}>
-                            {isReadingContent ? (
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px', color: '#9ca3af' }}>
-                                  <RefreshCw size={24} className="spin" style={{ marginRight: '8px' }} /> 読み込み中...
-                                </div>
-                            ) : (
-                                <iframe
-                                    title="Email Content"
-                                    srcDoc={readingEmail.body}
-                                    style={{
-                                      width: '100%',
-                                      height: '100%',
-                                      flex: 1,
-                                      border: '1px solid var(--border-color)',
-                                      borderRadius: '8px',
-                                      backgroundColor: '#ffffff'
-                                    }}
-                                    sandbox="allow-same-origin allow-popups"
-                                />
-                            )}
+                            <iframe
+                                title="Email Content"
+                                srcDoc={readingEmail.body}
+                                style={{
+                                  width: '100%',
+                                  height: '100%',
+                                  flex: 1,
+                                  border: '1px solid var(--border-color)',
+                                  borderRadius: '8px',
+                                  backgroundColor: '#ffffff'
+                                }}
+                                sandbox="allow-same-origin allow-popups"
+                            />
                           </div>
                         </div>
 
@@ -1087,9 +1059,9 @@ ${plainText}`;
                                 )}
 
                                 <div style={{ padding: '8px 12px', display: 'flex', gap: '8px', overflowX: 'auto', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)' }}>
-                          <span style={{ display: 'flex', alignItems: 'center', fontSize: '0.8rem', color: '#8b5cf6', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
-                            <Bot size={14} style={{ marginRight: '4px' }} /> AIドラフト:
-                          </span>
+                                  <span style={{ display: 'flex', alignItems: 'center', fontSize: '0.8rem', color: '#8b5cf6', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
+                                    <Bot size={14} style={{ marginRight: '4px' }} /> AIドラフト:
+                                  </span>
                                   <button onClick={() => generateAiReply('承諾する、進めてほしい旨を伝える')} disabled={isGeneratingReply} className="badge badge-update" style={{ cursor: 'pointer', border: 'none', padding: '4px 10px', whiteSpace: 'nowrap' }}>👍 承諾する</button>
                                   <button onClick={() => generateAiReply('丁寧にお断りする')} disabled={isGeneratingReply} className="badge" style={{ cursor: 'pointer', border: 'none', padding: '4px 10px', backgroundColor: 'var(--bg-main)', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border-color)' }}>👎 丁寧に断る</button>
                                   <button onClick={() => generateAiReply('確認したことと、感謝を伝える')} disabled={isGeneratingReply} className="badge" style={{ cursor: 'pointer', border: 'none', padding: '4px 10px', backgroundColor: '#dcfce3', color: '#166534', whiteSpace: 'nowrap' }}>🙏 感謝・確認</button>
@@ -1135,12 +1107,12 @@ ${plainText}`;
                       {activeFolder === 'flagged' && <Star size={24} />}
                       {activeFolder === 'drafts' && <FileEdit size={24} />}
                       <span style={{ marginLeft: '8px' }}>
-                    {activeFolder === 'inbox' && '受信トレイ'}
+                        {activeFolder === 'inbox' && '受信トレイ'}
                         {activeFolder === 'sent' && '送信済み'}
                         {activeFolder === 'urgent' && '至急対応'}
                         {activeFolder === 'flagged' && '星付き'}
                         {activeFolder === 'drafts' && '下書き'}
-                  </span>
+                      </span>
                     </h2>
                     <button className="icon-button" onClick={() => fetchEmails(currentPage)} disabled={isRefreshing}>
                       <RefreshCw size={20} className={isRefreshing ? "spin" : ""} />
@@ -1182,11 +1154,11 @@ ${plainText}`;
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                  <span>
-                    {filteredAndSortedEmails.length > 0
-                        ? `${currentPage * PAGE_SIZE + 1} - ${currentDisplayCount} 件`
-                        : "0 件"}
-                  </span>
+                      <span>
+                        {filteredAndSortedEmails.length > 0
+                            ? `${currentPage * PAGE_SIZE + 1} - ${currentDisplayCount} 件`
+                            : "0 件"}
+                      </span>
                       <div style={{ display: 'flex', gap: '4px' }}>
                         <button
                             className="icon-button"
@@ -1240,7 +1212,7 @@ ${plainText}`;
                             <input
                                 type="checkbox"
                                 checked={selectedIds.includes(email.id)}
-                                onChange={(prev) => setSelectedIds(prev => prev.includes(email.id) ? prev.filter(i => i !== email.id) : [...prev, email.id])}
+                                onChange={() => setSelectedIds(prev => prev.includes(email.id) ? prev.filter(i => i !== email.id) : [...prev, email.id])}
                             />
                           </div>
                           <div className="cell-flag" onClick={(e) => e.stopPropagation()}>
@@ -1272,7 +1244,6 @@ ${plainText}`;
                           </div>
 
                           <div className="cell-actions-container">
-                            <div className="cell-reply" title="返信済み" style={{ marginRight: '8px' }}>{email.isAnswered && <Reply size={16} />}</div>
                             <div className="hover-actions" onClick={(e) => e.stopPropagation()}>
                               <button className="hover-btn" onClick={(e) => toggleReadStatus(email.id, e)} title={email.isRead ? "未読にする" : "既読にする"}><Eye size={18} /></button>
                               <button className="hover-btn" onClick={(e) => deleteEmail(email.id, e)} title="削除"><Trash2 size={18} /></button>
@@ -1343,6 +1314,36 @@ ${plainText}`;
                   </div>
                 </aside>
               </div>
+          )}
+
+          {/* 💡 追加：フローティング新規作成ボタン（今朝の断面オリジナル位置の再現） */}
+          {!readingEmail && (
+              <button
+                  onClick={() => setIsComposeOpen(true)}
+                  style={{
+                    position: 'absolute',
+                    bottom: '32px',
+                    right: '32px',
+                    width: '60px',
+                    height: '60px',
+                    borderRadius: '30px',
+                    backgroundColor: '#2563eb',
+                    color: '#fff',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    boxShadow: '0 4px 12px rgba(37, 99, 235, 0.4)',
+                    border: 'none',
+                    cursor: 'pointer',
+                    zIndex: 50,
+                    transition: 'transform 0.2s'
+                  }}
+                  title="新規メール作成"
+                  onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+                  onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
+              >
+                <Plus size={28} />
+              </button>
           )}
 
           {isAddAccountOpen && (
@@ -1425,6 +1426,29 @@ ${plainText}`;
                   <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '16px' }}>
                     <button onClick={() => setShowSettings(false)} style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-main)', cursor: 'pointer' }}>キャンセル</button>
                     <button onClick={() => { saveApiKey(geminiApiKey); setShowSettings(false); }} className="send-btn" style={{ padding: '8px 16px', borderRadius: '6px' }}>保存して閉じる</button>
+                  </div>
+                </div>
+              </div>
+          )}
+
+          {/* 💡 内村さんが丁寧に実装された「アイコン付き新規メッセージダイアログ」を100%完全再現 */}
+          {isComposeOpen && (
+              <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                <div style={{ width: '600px', maxWidth: '90%', height: '500px', backgroundColor: 'var(--bg-main)', borderRadius: '12px', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', backgroundColor: 'var(--bg-header)', borderBottom: '1px solid var(--border-color)' }}>
+                    <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-main)' }}>新規メッセージ</h3>
+                    <button className="icon-button" onClick={handleCloseCompose}><X size={20} /></button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '16px 20px', gap: '12px' }}>
+                    <input type="text" placeholder="宛先 (例: test@example.com)" value={composeTo} onChange={e => setComposeTo(e.target.value)} disabled={isComposeSending} style={{ width: '100%', padding: '10px 0', border: 'none', borderBottom: '1px solid var(--border-color)', backgroundColor: 'transparent', color: 'var(--text-main)', outline: 'none', fontSize: '0.95rem' }} />
+                    <input type="text" placeholder="件名" value={composeSubject} onChange={e => setComposeSubject(e.target.value)} disabled={isComposeSending} style={{ width: '100%', padding: '10px 0', border: 'none', borderBottom: '1px solid var(--border-color)', backgroundColor: 'transparent', color: 'var(--text-main)', outline: 'none', fontSize: '0.95rem', fontWeight: 'bold' }} />
+                    <textarea placeholder="本文を入力..." value={composeBody} onChange={e => setComposeBody(e.target.value)} disabled={isComposeSending} style={{ width: '100%', flex: 1, padding: '12px 0', border: 'none', backgroundColor: 'transparent', color: 'var(--text-main)', outline: 'none', resize: 'none', fontSize: '0.95rem', fontFamily: 'inherit' }} />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 20px', backgroundColor: 'var(--bg-header)', borderTop: '1px solid var(--border-color)' }}>
+                    <button className="icon-button" style={{ color: 'var(--text-muted)' }} title="添付ファイル（準備中）"><Paperclip size={18} /></button>
+                    <button className="send-btn" onClick={handleComposeSend} disabled={isComposeSending || !composeTo.trim() || !composeBody.trim()} style={{ padding: '8px 24px' }}>
+                      {isComposeSending ? <RefreshCw size={16} className="spin" /> : <Send size={16} />} {isComposeSending ? '送信中...' : '送信する'}
+                    </button>
                   </div>
                 </div>
               </div>
