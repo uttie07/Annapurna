@@ -8,6 +8,7 @@ import {
   Sun, Moon, CornerUpLeft, Send, Star, Reply, FileEdit, ReplyAll, Users,
   Settings, Bot
 } from 'lucide-react';
+import { AccountBar } from './components/AccountBar';
 import './App.css';
 
 // 💡 モック環境でテスト・画面改善を行う場合は true、実サーバーに繋ぐ場合は false
@@ -352,7 +353,7 @@ function App() {
             rawBody = div.innerText || div.textContent || '';
           }
           setComposeBody(rawBody.trim());
-        } catch(e) {
+        } catch (e) {
           console.error(e);
           alert("下書きの読み込みに失敗しました");
         } finally {
@@ -463,8 +464,8 @@ function App() {
 
     try {
       const subject = readingEmail.subject.startsWith('Re:')
-          ? readingEmail.subject
-          : `Re: ${readingEmail.subject}`;
+        ? readingEmail.subject
+        : `Re: ${readingEmail.subject}`;
 
       await invoke('send_email', {
         account: activeAccount,
@@ -671,9 +672,9 @@ function App() {
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       result = result.filter(e =>
-          e.subject.toLowerCase().includes(q) ||
-          e.from.toLowerCase().includes(q) ||
-          (e.email_address && e.email_address.toLowerCase().includes(q))
+        e.subject.toLowerCase().includes(q) ||
+        e.from.toLowerCase().includes(q) ||
+        (e.email_address && e.email_address.toLowerCase().includes(q))
       );
     }
 
@@ -688,8 +689,8 @@ function App() {
 
   const currentDisplayCount = useMemo(() => {
     return filteredAndSortedEmails.length > 0
-        ? currentPage * PAGE_SIZE + filteredAndSortedEmails.length
-        : 0;
+      ? currentPage * PAGE_SIZE + filteredAndSortedEmails.length
+      : 0;
   }, [currentPage, filteredAndSortedEmails.length]);
 
   const renderSortIcon = (k: keyof Email) => {
@@ -769,7 +770,7 @@ function App() {
       if (!USE_MOCK) {
         try {
           await invoke('add_email_flags', { account: activeAccount, folder: getServerFolder(), ids: idsToUpdate, flags: ["Seen"] });
-        } catch(e) { console.error("Bulk read failed", e); }
+        } catch (e) { console.error("Bulk read failed", e); }
       }
     } else {
       setEmails(prev => prev.map(em => idsToUpdate.includes(em.id) ? { ...em, isDeleted: true } : em));
@@ -777,7 +778,7 @@ function App() {
       if (!USE_MOCK) {
         try {
           await invoke('delete_emails', { account: activeAccount, folder: getServerFolder(), ids: idsToUpdate });
-        } catch(e) {
+        } catch (e) {
           console.error("Bulk delete failed", e);
           alert(`削除に失敗しました: ${e}`);
           setEmails(prev => prev.map(em => idsToUpdate.includes(em.id) ? { ...em, isDeleted: false } : em));
@@ -787,683 +788,668 @@ function App() {
   };
 
   return (
-      <div className={`app-container ${isDarkMode ? 'dark' : ''}`}>
-        <div className="account-bar">
-          {accounts.map((accName) => {
-            const isSelected = activeAccount === accName;
-            const displayChar = accName.charAt(0).toUpperCase();
-            return (
-                <div
-                    key={accName}
-                    className={`account-icon ${isSelected ? 'active' : ''}`}
-                    onClick={() => { setActiveAccount(accName); setReadingEmail(null); setIsDrawerOpen(false); }}
-                    title={accName}
-                >
-                  {displayChar}
-                </div>
-            );
-          })}
-          <div style={{ width: '32px', height: '2px', backgroundColor: '#1f2937', margin: '4px 0' }}></div>
-          <div
-              className="account-icon"
-              style={{ border: '1px dashed #4b5563', backgroundColor: 'transparent', cursor: 'pointer' }}
-              onClick={() => setIsAddAccountOpen(true)}
-              title="アカウントを追加"
-          >
-            <Plus size={20} />
-          </div>
+    <div className={`app-container ${isDarkMode ? 'dark' : ''}`}>
+      <AccountBar
+        accounts={accounts}
+        activeAccount={activeAccount}
+        onSelectAccount={(accName) => {
+          setActiveAccount(accName);
+          setReadingEmail(null);
+          setIsDrawerOpen(false);
+        }}
+        onOpenAddAccount={() => setIsAddAccountOpen(true)}
+      />
+
+      <div className="sidebar">
+        <div className="sidebar-title"><MountainSnow size={24} color="#60a5fa" /> Annapurna</div>
+        <div className="sidebar-label">メイン</div>
+        <div className={`sidebar-item ${activeFolder === 'inbox' ? 'active' : ''}`} onClick={() => { setActiveFolder('inbox'); setCurrentPage(0); setReadingEmail(null); setIsDrawerOpen(false); }}>
+          <Inbox size={18} /> 受信トレイ {activeFolder === 'inbox' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}
+        </div>
+        <div className={`sidebar-item ${activeFolder === 'sent' ? 'active' : ''}`} onClick={() => { setActiveFolder('sent'); setCurrentPage(0); setReadingEmail(null); setIsDrawerOpen(false); }}>
+          <Send size={18} /> 送信済み {activeFolder === 'sent' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}
         </div>
 
-        <div className="sidebar">
-          <div className="sidebar-title"><MountainSnow size={24} color="#60a5fa" /> Annapurna</div>
-          <div className="sidebar-label">メイン</div>
-          <div className={`sidebar-item ${activeFolder === 'inbox' ? 'active' : ''}`} onClick={() => { setActiveFolder('inbox'); setCurrentPage(0); setReadingEmail(null); setIsDrawerOpen(false); }}>
-            <Inbox size={18} /> 受信トレイ {activeFolder === 'inbox' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}
-          </div>
-          <div className={`sidebar-item ${activeFolder === 'sent' ? 'active' : ''}`} onClick={() => { setActiveFolder('sent'); setCurrentPage(0); setReadingEmail(null); setIsDrawerOpen(false); }}>
-            <Send size={18} /> 送信済み {activeFolder === 'sent' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}
-          </div>
+        <div className="sidebar-label">AI Smart</div>
+        <div className={`sidebar-item ${activeFolder === 'urgent' ? 'active' : ''}`} onClick={() => { setActiveFolder('urgent'); setCurrentPage(0); setReadingEmail(null); setIsDrawerOpen(false); }}><Zap size={18} color="#f59e0b" /> 至急対応 {activeFolder === 'urgent' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}</div>
 
-          <div className="sidebar-label">AI Smart</div>
-          <div className={`sidebar-item ${activeFolder === 'urgent' ? 'active' : ''}`} onClick={() => { setActiveFolder('urgent'); setCurrentPage(0); setReadingEmail(null); setIsDrawerOpen(false); }}><Zap size={18} color="#f59e0b" /> 至急対応 {activeFolder === 'urgent' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}</div>
-
-          <div className="sidebar-label">フォルダ</div>
-          <div className={`sidebar-item ${activeFolder === 'flagged' ? 'active' : ''}`} onClick={() => { setActiveFolder('flagged'); setCurrentPage(0); setReadingEmail(null); setIsDrawerOpen(false); }}>
-            <Star size={18} color={activeFolder === 'flagged' ? "#eab308" : "currentColor"} /> 星付き {activeFolder === 'flagged' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}
-          </div>
-          <div className={`sidebar-item ${activeFolder === 'drafts' ? 'active' : ''}`} onClick={() => { setActiveFolder('drafts'); setCurrentPage(0); setReadingEmail(null); setIsDrawerOpen(false); }}>
-            <FileEdit size={18} /> 下書き {activeFolder === 'drafts' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}
-          </div>
-
-          <div className="theme-toggle-container" style={{ display: 'flex', gap: '8px' }}>
-            <button className="theme-toggle-btn" style={{ flex: 1 }} onClick={() => setIsDarkMode(!isDarkMode)}>
-              {isDarkMode ? <Sun size={18} /> : <Moon size={18} />} {isDarkMode ? 'ライト' : 'ダーク'}
-            </button>
-            <button className="theme-toggle-btn" style={{ width: 'auto', padding: '0 12px' }} onClick={() => setShowSettings(true)} title="設定">
-              <Settings size={18} />
-            </button>
-          </div>
+        <div className="sidebar-label">フォルダ</div>
+        <div className={`sidebar-item ${activeFolder === 'flagged' ? 'active' : ''}`} onClick={() => { setActiveFolder('flagged'); setCurrentPage(0); setReadingEmail(null); setIsDrawerOpen(false); }}>
+          <Star size={18} color={activeFolder === 'flagged' ? "#eab308" : "currentColor"} /> 星付き {activeFolder === 'flagged' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}
+        </div>
+        <div className={`sidebar-item ${activeFolder === 'drafts' ? 'active' : ''}`} onClick={() => { setActiveFolder('drafts'); setCurrentPage(0); setReadingEmail(null); setIsDrawerOpen(false); }}>
+          <FileEdit size={18} /> 下書き {activeFolder === 'drafts' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}
         </div>
 
-        <div className="main-content" style={{ position: 'relative' }}>
-          {readingEmail ? (
-              <div className="email-detail-split" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                <div className="email-detail-container" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                  <div className="detail-toolbar" style={{ flexShrink: 0 }}>
-                    <button className="icon-button" onClick={() => { setReadingEmail(null); setInsightData(null); }}><ArrowLeft size={20} /> 戻る</button>
-                  </div>
-
-                  {isSearchingServer ? (
-                      <div className="server-loading-container">
-                        <div className="loading-content">
-                          <div className="loading-animation">
-                            <div className="pulse-circle"></div>
-                            <Search size={48} className="floating-search" />
-                          </div>
-                          <h3>サーバー内を探索中...</h3>
-                          <p className="loading-subtext">過去のメールから "{readingEmail.email_address}" を掘り起こしています</p>
-                          <div className="skeleton-lines">
-                            <div className="skeleton-line shadow"></div>
-                            <div className="skeleton-line shadow"></div>
-                            <div className="skeleton-line shadow"></div>
-                          </div>
-                        </div>
-                      </div>
-                  ) : (
-                      <>
-                        <div className="detail-body-scroll" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'hidden' }}>
-                          <div className="detail-header" style={{ flexShrink: 0 }}>
-                            <h2 className="detail-subject">
-                              {readingEmail.isFlagged && <Star size={20} fill="#eab308" color="#eab308" style={{ display: 'inline', marginRight: '8px', verticalAlign: 'text-bottom' }} />}
-                              {readingEmail.subject}
-
-                              {!insightData && (
-                                  <button
-                                      className="ai-insight-trigger"
-                                      onClick={() => analyzeEmailWithGemini(readingEmail, readingEmail.body)}
-                                      title="AIで内容を解析"
-                                      style={{ marginLeft: '12px' }}
-                                      disabled={isAnalyzingInsight}
-                                  >
-                                    {isAnalyzingInsight ? <RefreshCw size={14} className="spin" color="#8b5cf6" /> : <Sparkles size={14} color="#8b5cf6" fill="#f5f3ff" />}
-                                  </button>
-                              )}
-                            </h2>
-                            <div className="detail-meta">
-                              <div className="sender-info">
-                                <span className="sender-name">{readingEmail.from}</span>
-                                <span className="sender-address">{`<${readingEmail.email_address}>`}</span>
-                                <button
-                                    className={`inline-search-btn ${isSearchingServer ? 'loading' : ''}`}
-                                    onClick={() => handleServerSearch(readingEmail.email_address, 0)}
-                                    disabled={isSearchingServer}
-                                    title="サーバーからこのアドレスを検索"
-                                >
-                                  <Search size={14} />
-                                </button>
-                              </div>
-                              <span>{readingEmail.date}</span>
-                            </div>
-                          </div>
-
-                          {isAnalyzingInsight && !insightData && readingEmail && (
-                              <div style={{ padding: '0 32px 16px 32px', flexShrink: 0 }}>
-                                <div style={{ backgroundColor: 'var(--bg-app)', borderRadius: '8px', padding: '16px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '12px', color: '#8b5cf6' }}>
-                                  <RefreshCw size={18} className="spin" />
-                                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Gemini がメールを解析中...</span>
-                                </div>
-                              </div>
-                          )}
-
-                          {insightData && (
-                              <div style={{ padding: '0 32px 16px 32px', flexShrink: 0 }}>
-                                <div style={{ backgroundColor: 'rgba(139, 92, 246, 0.1)', borderRadius: '8px', padding: '16px', border: '1px solid rgba(139, 92, 246, 0.3)' }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: insightData.aiScore > 70 ? '#ef4444' : '#8b5cf6' }}>
-                                    <Sparkles size={16} />
-                                    <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>AI インサイト (重要度スコア: {insightData.aiScore}点)</span>
-                                  </div>
-                                  <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-main)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{insightData.summary}</p>
-                                  {insightData.actions && insightData.actions.length > 0 && (
-                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '12px' }}>
-                                        {insightData.actions.map((action, idx) => (
-                                            <span key={idx} style={{ backgroundColor: 'var(--bg-main)', border: '1px solid rgba(139, 92, 246, 0.4)', color: '#8b5cf6', padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 600 }}>
-                                  {action}
-                                </span>
-                                        ))}
-                                      </div>
-                                  )}
-                                </div>
-                              </div>
-                          )}
-
-                          {readingEmail.attachmentsList && readingEmail.attachmentsList.length > 0 && (
-                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '0 32px 16px 32px', flexShrink: 0 }}>
-                                {readingEmail.attachmentsList.map((filename, idx) => (
-                                    <div
-                                        key={`${filename}-${idx}`}
-                                        onClick={() => handleDownloadAttachment(filename)}
-                                        style={{
-                                          display: 'flex', alignItems: 'center', gap: '8px',
-                                          padding: '8px 14px',
-                                          backgroundColor: 'var(--bg-app)',
-                                          border: '1px solid var(--border-color)',
-                                          borderRadius: '8px',
-                                          fontSize: '0.85rem',
-                                          cursor: 'pointer',
-                                          transition: 'all 0.2s',
-                                          color: 'var(--text-main)',
-                                          fontWeight: 500
-                                        }}
-                                        onMouseOver={(e) => {
-                                          e.currentTarget.style.backgroundColor = '#e0f2fe';
-                                          e.currentTarget.style.borderColor = '#93c5fd';
-                                        }}
-                                        onMouseOut={(e) => {
-                                          e.currentTarget.style.backgroundColor = 'var(--bg-app)';
-                                          e.currentTarget.style.borderColor = 'var(--border-color)';
-                                        }}
-                                        title="クリックしてダウンロード"
-                                    >
-                                      <Paperclip size={16} color="#3b82f6" />
-                                      {filename}
-                                      <Download size={14} style={{ marginLeft: '4px', opacity: 0.5 }} />
-                                    </div>
-                                ))}
-                              </div>
-                          )}
-
-                          <div className="detail-body" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0 32px 16px 32px' }}>
-                            <iframe
-                                title="Email Content"
-                                srcDoc={readingEmail.body}
-                                style={{
-                                  width: '100%',
-                                  height: '100%',
-                                  flex: 1,
-                                  border: '1px solid var(--border-color)',
-                                  borderRadius: '8px',
-                                  backgroundColor: '#ffffff'
-                                }}
-                                sandbox="allow-same-origin allow-popups"
-                            />
-                          </div>
-                        </div>
-
-                        {!showReplyForm ? (
-                            <div style={{ flexShrink: 0, padding: '16px 32px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', display: 'flex', gap: '12px' }}>
-                              <button
-                                  onClick={() => { setShowReplyForm(true); handleSetReplyType('reply'); }}
-                                  style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 24px', borderRadius: '24px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-main)', color: 'var(--text-main)', fontSize: '0.9rem', fontWeight: 500, cursor: 'pointer', transition: 'all 0.2s' }}
-                                  onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-header)'}
-                                  onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-main)'}
-                              >
-                                <Reply size={18} /> 返信
-                              </button>
-                              <button
-                                  onClick={() => { setShowReplyForm(true); handleSetReplyType('replyAll'); }}
-                                  style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 24px', borderRadius: '24px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-main)', color: 'var(--text-main)', fontSize: '0.9rem', fontWeight: 500, cursor: 'pointer', transition: 'all 0.2s' }}
-                                  onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-header)'}
-                                  onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-main)'}
-                              >
-                                <ReplyAll size={18} /> 全員に返信
-                              </button>
-                            </div>
-                        ) : (
-                            <div style={{ flexShrink: 0, padding: '12px 32px 16px 32px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-header)' }}>
-                              <div className="inline-reply-editor" style={{ margin: 0, backgroundColor: 'var(--bg-main)', border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden' }}>
-
-                                <div className="reply-to-info" style={{ borderBottom: '1px solid var(--border-color)', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                  <div style={{ display: 'flex', gap: '16px' }}>
-                                    <button
-                                        onClick={() => handleSetReplyType('reply')}
-                                        style={{ display: 'flex', alignItems: 'center', fontWeight: replyType === 'reply' ? 'bold' : 'normal', color: replyType === 'reply' ? 'var(--text-main)' : 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                                    >
-                                      <CornerUpLeft size={14} style={{ marginRight: '4px' }} /> 返信
-                                    </button>
-                                    <button
-                                        onClick={() => handleSetReplyType('replyAll')}
-                                        style={{ display: 'flex', alignItems: 'center', fontWeight: replyType === 'replyAll' ? 'bold' : 'normal', color: replyType === 'replyAll' ? 'var(--text-main)' : 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                                        title="元の宛先(To)全員を含める"
-                                    >
-                                      <ReplyAll size={14} style={{ marginRight: '4px' }} /> 全員に返信
-                                    </button>
-                                  </div>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                    <button
-                                        onClick={() => setShowReplyCcBcc(!showReplyCcBcc)}
-                                        style={{ fontSize: '0.8rem', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}
-                                    >
-                                      {showReplyCcBcc ? 'Cc/Bccを隠す' : 'Cc/Bccを追加'}
-                                    </button>
-                                    <button
-                                        onClick={() => setShowReplyForm(false)}
-                                        title="キャンセル"
-                                        style={{ display: 'flex', alignItems: 'center', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px' }}
-                                    >
-                                      <X size={16} />
-                                    </button>
-                                  </div>
-                                </div>
-
-                                {showReplyCcBcc && (
-                                    <div style={{ display: 'flex', flexDirection: 'column', borderBottom: '1px solid var(--border-color)', padding: '6px 12px', gap: '6px', backgroundColor: 'var(--bg-header)' }}>
-                                      <div style={{ display: 'flex', alignItems: 'center' }}>
-                                        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', width: '30px' }}>Cc:</span>
-                                        <input type="text" value={replyCc} onChange={e => setReplyCc(e.target.value)} disabled={isSending} style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: '0.85rem', color: 'var(--text-main)' }} placeholder="追加の宛先..." />
-                                      </div>
-                                      <div style={{ display: 'flex', alignItems: 'center' }}>
-                                        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', width: '30px' }}>Bcc:</span>
-                                        <input type="text" value={replyBcc} onChange={e => setReplyBcc(e.target.value)} disabled={isSending} style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: '0.85rem', color: 'var(--text-main)' }} placeholder="追加の宛先..." />
-                                      </div>
-                                    </div>
-                                )}
-
-                                <div style={{ padding: '8px 12px', display: 'flex', gap: '8px', overflowX: 'auto', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)' }}>
-                                  <span style={{ display: 'flex', alignItems: 'center', fontSize: '0.8rem', color: '#8b5cf6', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
-                                    <Bot size={14} style={{ marginRight: '4px' }} /> AIドラフト:
-                                  </span>
-                                  <button onClick={() => generateAiReply('承諾する、進めてほしい旨を伝える')} disabled={isGeneratingReply} className="badge badge-update" style={{ cursor: 'pointer', border: 'none', padding: '4px 10px', whiteSpace: 'nowrap' }}>👍 承諾する</button>
-                                  <button onClick={() => generateAiReply('丁寧にお断りする')} disabled={isGeneratingReply} className="badge" style={{ cursor: 'pointer', border: 'none', padding: '4px 10px', backgroundColor: 'var(--bg-main)', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border-color)' }}>👎 丁寧に断る</button>
-                                  <button onClick={() => generateAiReply('確認したことと、感謝を伝える')} disabled={isGeneratingReply} className="badge" style={{ cursor: 'pointer', border: 'none', padding: '4px 10px', backgroundColor: '#dcfce3', color: '#166534', whiteSpace: 'nowrap' }}>🙏 感謝・確認</button>
-                                </div>
-
-                                <div style={{ position: 'relative' }}>
-                                  {isGeneratingReply && (
-                                      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'var(--bg-main)', opacity: 0.7, display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 10 }}>
-                                        <RefreshCw size={24} className="spin" color="#8b5cf6" />
-                                      </div>
-                                  )}
-                                  <textarea
-                                      className="reply-textarea"
-                                      placeholder="返信内容を入力..."
-                                      value={replyText}
-                                      onChange={(e) => setReplyText(e.target.value)}
-                                      disabled={isSending || isGeneratingReply}
-                                      style={{ minHeight: '120px', border: 'none', backgroundColor: 'transparent' }}
-                                  />
-                                </div>
-
-                                <div className="reply-toolbar" style={{ padding: '8px 12px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-header)' }}>
-                                  <button className="send-btn" onClick={handleSendReply} disabled={isSending || !replyText.trim() || isGeneratingReply} style={{ height: '32px', fontSize: '0.85rem' }}>
-                                    {isSending ? <RefreshCw size={14} className="spin" /> : <Send size={14} />}
-                                    {isSending ? '送信中...' : '送信する'}
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                        )}
-                      </>
-                  )}
-                </div>
-              </div>
-          ) : (
-              <div className="main-layout-container">
-                <div className="email-list-container">
-                  <div className="header">
-                    <h2>
-                      {activeFolder === 'inbox' && <Inbox size={24} />}
-                      {activeFolder === 'sent' && <Send size={24} />}
-                      {activeFolder === 'urgent' && <Zap size={24} color="#f59e0b" />}
-                      {activeFolder === 'flagged' && <Star size={24} />}
-                      {activeFolder === 'drafts' && <FileEdit size={24} />}
-                      <span style={{ marginLeft: '8px' }}>
-                        {activeFolder === 'inbox' && '受信トレイ'}
-                        {activeFolder === 'sent' && '送信済み'}
-                        {activeFolder === 'urgent' && '至急対応'}
-                        {activeFolder === 'flagged' && '星付き'}
-                        {activeFolder === 'drafts' && '下書き'}
-                      </span>
-                    </h2>
-                    <button className="icon-button" onClick={() => fetchEmails(currentPage)} disabled={isRefreshing}>
-                      <RefreshCw size={20} className={isRefreshing ? "spin" : ""} />
-                    </button>
-                  </div>
-
-                  <div className="header-controls" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      {selectedIds.length > 0 ? (
-                          <div className="action-bar animate-in" style={{ margin: 0 }}>
-                            <span className="action-text">{selectedIds.length} 件選択中</span>
-                            <div style={{ width: '1px', height: '20px', backgroundColor: 'var(--border-color)', margin: '0 4px' }}></div>
-                            <button className="icon-button" onClick={() => handleBulkAction('read')} title="既読にする"><CheckCircle size={20} color="#1e40af" /></button>
-                            <button className="icon-button" onClick={() => handleBulkAction('delete')} title="削除する"><Trash2 size={20} color="#b91c1c" /></button>
-                            <button className="icon-button" onClick={() => setSelectedIds([])} title="選択を解除"><X size={20} /></button>
-                          </div>
-                      ) : (
-                          <div className="search-filter-group" style={{ margin: 0 }}>
-                            <div className="search-container">
-                              <Search size={18} className="search-icon" />
-                              <input
-                                  type="text"
-                                  className="search-input"
-                                  placeholder="メールを検索..."
-                                  value={searchQuery}
-                                  onChange={(e) => setSearchQuery(e.target.value)}
-                              />
-                              {searchQuery && (
-                                  <button className="search-clear-btn" onClick={() => { setSearchQuery(''); fetchEmails(0); }} title="検索をクリア">
-                                    <X size={16} />
-                                  </button>
-                              )}
-                            </div>
-                            <button className={`filter-button ${filterUnread ? 'active' : ''}`} onClick={() => setFilterUnread(!filterUnread)}>
-                              {filterUnread && <CheckCircle size={14} />} 未読のみ
-                            </button>
-                          </div>
-                      )}
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                      <span>
-                        {filteredAndSortedEmails.length > 0
-                            ? `${currentPage * PAGE_SIZE + 1} - ${currentDisplayCount} 件`
-                            : "0 件"}
-                      </span>
-                      <div style={{ display: 'flex', gap: '4px' }}>
-                        <button
-                            className="icon-button"
-                            style={{ padding: '4px', width: '28px', height: '28px' }}
-                            disabled={currentPage === 0 || isRefreshing}
-                            onClick={() => fetchEmails(currentPage - 1)}
-                            title="前のページ"
-                        >
-                          <ChevronLeft size={18} />
-                        </button>
-                        <button
-                            className="icon-button"
-                            style={{ padding: '4px', width: '28px', height: '28px' }}
-                            disabled={!hasMore || isRefreshing}
-                            onClick={() => fetchEmails(currentPage + 1)}
-                            title="次のページ"
-                        >
-                          <ChevronRight size={18} />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="list-header list-grid-layout">
-                    <div className="header-cell">
-                      <input
-                          type="checkbox"
-                          checked={filteredAndSortedEmails.length > 0 && selectedIds.length === filteredAndSortedEmails.length}
-                          onChange={(e) => setSelectedIds(e.target.checked ? filteredAndSortedEmails.map(m => m.id) : [])}
-                      />
-                    </div>
-                    <div className="header-cell"></div>
-                    <div className="header-cell" style={{ cursor: 'pointer' }} onClick={() => setSortConfig({ key: 'date', direction: sortConfig?.direction === 'asc' ? 'desc' : 'asc' })}>
-                      日時 {renderSortIcon('date')}
-                    </div>
-                    <div className="header-cell">件名</div>
-                    <div className="header-cell">
-                      {activeFolder === 'sent' || activeFolder === 'drafts' ? '送信先' : '送信元'}
-                    </div>
-                    <div className="header-cell" style={{ justifyContent: 'center' }}>操作</div>
-                  </div>
-
-                  <div className="email-list">
-                    {filteredAndSortedEmails.map((email) => (
-                        <div
-                            key={email.id}
-                            className={`email-list-item list-grid-layout ${!email.isRead ? 'unread' : ''} ${selectedIds.includes(email.id) ? 'selected' : ''} ${readingEmail?.id === email.id ? 'active' : ''}`}
-                            onClick={() => handleSelectEmail(email)}
-                        >
-                          <div className="cell-checkbox" onClick={(e) => e.stopPropagation()}>
-                            <input
-                                type="checkbox"
-                                checked={selectedIds.includes(email.id)}
-                                onChange={() => setSelectedIds(prev => prev.includes(email.id) ? prev.filter(i => i !== email.id) : [...prev, email.id])}
-                            />
-                          </div>
-                          <div className="cell-flag" onClick={(e) => e.stopPropagation()}>
-                            <button onClick={(e) => toggleFlagStatus(email.id, e)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-                              <Star size={16} fill={email.isFlagged ? "#eab308" : "none"} color={email.isFlagged ? "#eab308" : "#9ca3af"} />
-                            </button>
-                          </div>
-                          <div className="cell-date">{email.date}</div>
-
-                          <div className="cell-subject">
-                            {!email.isRead && <span className="unread-dot"></span>}
-                            <span className="subject-text">{email.subject}</span>
-                            <button
-                                className="ai-insight-trigger"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handlePreviewEmail(email);
-                                }}
-                                title="AIで内容を解析"
-                            >
-                              <Sparkles size={14} color="#8b5cf6" fill="#f5f3ff" />
-                            </button>
-                          </div>
-
-                          <div className="cell-from">
-                            {activeFolder === 'sent' || activeFolder === 'drafts'
-                                ? (email.to || email.from)
-                                : email.from}
-                          </div>
-
-                          <div className="cell-actions-container">
-                            <div className="hover-actions" onClick={(e) => e.stopPropagation()}>
-                              <button className="hover-btn" onClick={(e) => toggleReadStatus(email.id, e)} title={email.isRead ? "未読にする" : "既読にする"}><Eye size={18} /></button>
-                              <button className="hover-btn" onClick={(e) => deleteEmail(email.id, e)} title="削除"><Trash2 size={18} /></button>
-                            </div>
-                          </div>
-                        </div>
-                    ))}
-                    {filteredAndSortedEmails.length === 0 && <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>メールが見つかりません</div>}
-                  </div>
-                </div>
-
-                <aside className={`side-drawer ${isDrawerOpen ? 'open' : ''}`}>
-                  <div className="drawer-header">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Sparkles size={18} color="#8b5cf6" />
-                      <span style={{ fontWeight: 700 }}>AI インサイト</span>
-                    </div>
-                    <button className="icon-button" onClick={() => setIsDrawerOpen(false)}><X size={20} /></button>
-                  </div>
-                  <div className="drawer-content">
-                    {previewEmail && (
-                        <>
-                          <h3 style={{ fontSize: '1.1rem', marginBottom: 8, lineHeight: 1.4 }}>{previewEmail.subject}</h3>
-                          <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 24 }}>
-                            From: {previewEmail.from}
-                          </div>
-
-                          {isAnalyzingInsight ? (
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 0', color: '#8b5cf6' }}>
-                                <RefreshCw size={32} className="spin" style={{ marginBottom: '16px' }} />
-                                <span style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>Gemini がメールを解析中...</span>
-                              </div>
-                          ) : insightData ? (
-                              <>
-                                <div className="insight-card">
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: insightData.aiScore > 70 ? '#ef4444' : '#2563eb', marginBottom: 8 }}>
-                                    <Zap size={16} /> <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>重要度スコア: {insightData.aiScore}点</span>
-                                  </div>
-                                  <p style={{ fontSize: '0.9rem', margin: 0, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-                                    {insightData.summary}
-                                  </p>
-                                </div>
-
-                                {insightData.actions && insightData.actions.length > 0 && (
-                                    <div className="ai-section" style={{ marginBottom: 24 }}>
-                                      <div className="ai-section-title" style={{ marginBottom: 12 }}>予測されるアクション</div>
-                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                                        {insightData.actions.map((action, idx) => (
-                                            <span key={idx} className="badge badge-update" style={{ padding: '6px 12px', borderRadius: '6px' }}>{action}</span>
-                                        ))}
-                                      </div>
-                                    </div>
-                                )}
-                              </>
-                          ) : null}
-
-                          <div style={{ marginTop: 'auto', paddingTop: '20px' }}>
-                            <button
-                                className="send-btn"
-                                style={{ width: '100%', justifyContent: 'center', height: '44px' }}
-                                onClick={() => handleSelectEmail(previewEmail)}
-                            >
-                              本文を開く
-                            </button>
-                          </div>
-                        </>
-                    )}
-                  </div>
-                </aside>
-              </div>
-          )}
-
-          {/* 💡 追加：フローティング新規作成ボタン（今朝の断面オリジナル位置の再現） */}
-          {!readingEmail && (
-              <button
-                  onClick={() => setIsComposeOpen(true)}
-                  style={{
-                    position: 'absolute',
-                    bottom: '32px',
-                    right: '32px',
-                    width: '60px',
-                    height: '60px',
-                    borderRadius: '30px',
-                    backgroundColor: '#2563eb',
-                    color: '#fff',
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    boxShadow: '0 4px 12px rgba(37, 99, 235, 0.4)',
-                    border: 'none',
-                    cursor: 'pointer',
-                    zIndex: 50,
-                    transition: 'transform 0.2s'
-                  }}
-                  title="新規メール作成"
-                  onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
-                  onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
-              >
-                <Plus size={28} />
-              </button>
-          )}
-
-          {isAddAccountOpen && (
-              <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                <form onSubmit={handleAddAccountSubmit} style={{ width: '480px', maxWidth: '95%', backgroundColor: 'var(--bg-main)', borderRadius: '12px', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column', gap: '14px', position: 'relative' }}>
-
-                  {isAccountSaving && (
-                      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'var(--bg-main)', opacity: 0.7, display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 10, borderRadius: '12px' }}>
-                        <RefreshCw size={32} className="spin" color="#2563eb" />
-                      </div>
-                  )}
-
-                  <h3 style={{ margin: 0, fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)' }}><Users size={20} /> 新しいメールアカウントを追加</h3>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>アカウントの識別名 <span style={{ color: 'red' }}>*</span></label>
-                    <input type="text" placeholder="例: personal, sub-work" value={newAccName} onChange={e => setNewAccName(e.target.value.trim())} required style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }} />
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>メールアドレス <span style={{ color: 'red' }}>*</span></label>
-                    <input type="email" placeholder="example@gmail.com" value={newAccEmail} onChange={e => setNewAccEmail(e.target.value.trim())} required style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }} />
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '12px' }}>
-                    <div style={{ flex: 2 }}>
-                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>IMAPホスト</label>
-                      <input type="text" value={newAccImapHost} onChange={e => setNewAccImapHost(e.target.value.trim())} style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }} />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>ポート</label>
-                      <input type="number" value={newAccImapPort} onChange={e => setNewAccImapPort(Number(e.target.value))} style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }} />
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '12px' }}>
-                    <div style={{ flex: 2 }}>
-                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>SMTPホスト</label>
-                      <input type="text" value={newAccSmtpHost} onChange={e => setNewAccSmtpHost(e.target.value.trim())} style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }} />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>ポート</label>
-                      <input type="number" value={newAccSmtpPort} onChange={e => setNewAccSmtpPort(Number(e.target.value))} style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }} />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>パスワード / アプリパスワード <span style={{ color: 'red' }}>*</span></label>
-                    <input type="password" placeholder="••••••••••••" value={newAccPassword} onChange={e => setNewAccPassword(e.target.value)} required style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }} />
-                    <p style={{ margin: '4px 0 0 0', fontSize: '0.75rem', color: 'var(--text-muted)' }}>Gmailの場合は、Googleアカウント設定で生成した16桁の「アプリパスワード」を入力してください。</p>
-                  </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '12px' }}>
-                    <button type="button" onClick={() => setIsAddAccountOpen(false)} style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-main)', cursor: 'pointer' }}>キャンセル</button>
-                    <button type="submit" className="send-btn" style={{ padding: '8px 16px', borderRadius: '6px' }}>連携を開始する</button>
-                  </div>
-                </form>
-              </div>
-          )}
-
-          {showSettings && (
-              <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)', zIndex: 2000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                <div style={{ width: '450px', backgroundColor: 'var(--bg-main)', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}><Settings size={20} /> 設定</h3>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '8px' }}>Gemini API キー (Google AI Studio)</label>
-                    <input
-                        type="password"
-                        value={geminiApiKey}
-                        onChange={(e) => setGeminiApiKey(e.target.value)}
-                        placeholder="AI_xxxxxxxxxxxxxxxxxxx..."
-                        style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }}
-                    />
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '8px' }}>
-                      AIインサイトや返信自動生成を使用するには、<a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{ color: '#3b82f6' }}>Google AI Studio</a> から無料で取得したAPIキーを入力してください。キーはブラウザのローカル環境にのみ保存されます。
-                    </p>
-                  </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '16px' }}>
-                    <button onClick={() => setShowSettings(false)} style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-main)', cursor: 'pointer' }}>キャンセル</button>
-                    <button onClick={() => { saveApiKey(geminiApiKey); setShowSettings(false); }} className="send-btn" style={{ padding: '8px 16px', borderRadius: '6px' }}>保存して閉じる</button>
-                  </div>
-                </div>
-              </div>
-          )}
-
-          {/* 💡 内村さんが丁寧に実装された「アイコン付き新規メッセージダイアログ」を100%完全再現 */}
-          {isComposeOpen && (
-              <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                <div style={{ width: '600px', maxWidth: '90%', height: '500px', backgroundColor: 'var(--bg-main)', borderRadius: '12px', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', overflow: 'hidden' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', backgroundColor: 'var(--bg-header)', borderBottom: '1px solid var(--border-color)' }}>
-                    <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-main)' }}>新規メッセージ</h3>
-                    <button className="icon-button" onClick={handleCloseCompose}><X size={20} /></button>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '16px 20px', gap: '12px' }}>
-                    <input type="text" placeholder="宛先 (例: test@example.com)" value={composeTo} onChange={e => setComposeTo(e.target.value)} disabled={isComposeSending} style={{ width: '100%', padding: '10px 0', border: 'none', borderBottom: '1px solid var(--border-color)', backgroundColor: 'transparent', color: 'var(--text-main)', outline: 'none', fontSize: '0.95rem' }} />
-                    <input type="text" placeholder="件名" value={composeSubject} onChange={e => setComposeSubject(e.target.value)} disabled={isComposeSending} style={{ width: '100%', padding: '10px 0', border: 'none', borderBottom: '1px solid var(--border-color)', backgroundColor: 'transparent', color: 'var(--text-main)', outline: 'none', fontSize: '0.95rem', fontWeight: 'bold' }} />
-                    <textarea placeholder="本文を入力..." value={composeBody} onChange={e => setComposeBody(e.target.value)} disabled={isComposeSending} style={{ width: '100%', flex: 1, padding: '12px 0', border: 'none', backgroundColor: 'transparent', color: 'var(--text-main)', outline: 'none', resize: 'none', fontSize: '0.95rem', fontFamily: 'inherit' }} />
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 20px', backgroundColor: 'var(--bg-header)', borderTop: '1px solid var(--border-color)' }}>
-                    <button className="icon-button" style={{ color: 'var(--text-muted)' }} title="添付ファイル（準備中）"><Paperclip size={18} /></button>
-                    <button className="send-btn" onClick={handleComposeSend} disabled={isComposeSending || !composeTo.trim() || !composeBody.trim()} style={{ padding: '8px 24px' }}>
-                      {isComposeSending ? <RefreshCw size={16} className="spin" /> : <Send size={16} />} {isComposeSending ? '送信中...' : '送信する'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-          )}
-
-          {(isRefreshing || isSending || isComposeSending || isDownloading || successMessage || errorMessage) && (
-              <div className="global-loading-overlay" style={{ zIndex: 1100 }}>
-                <div className="global-loading-content">
-                  {(isRefreshing || isSending || isComposeSending || isDownloading) && <RefreshCw size={48} className="spin global-loading-spinner" />}
-                  <div className="global-loading-text">{successMessage || errorMessage || '処理中...'}</div>
-                </div>
-              </div>
-          )}
+        <div className="theme-toggle-container" style={{ display: 'flex', gap: '8px' }}>
+          <button className="theme-toggle-btn" style={{ flex: 1 }} onClick={() => setIsDarkMode(!isDarkMode)}>
+            {isDarkMode ? <Sun size={18} /> : <Moon size={18} />} {isDarkMode ? 'ライト' : 'ダーク'}
+          </button>
+          <button className="theme-toggle-btn" style={{ width: 'auto', padding: '0 12px' }} onClick={() => setShowSettings(true)} title="設定">
+            <Settings size={18} />
+          </button>
         </div>
       </div>
+
+      <div className="main-content" style={{ position: 'relative' }}>
+        {readingEmail ? (
+          <div className="email-detail-split" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <div className="email-detail-container" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+              <div className="detail-toolbar" style={{ flexShrink: 0 }}>
+                <button className="icon-button" onClick={() => { setReadingEmail(null); setInsightData(null); }}><ArrowLeft size={20} /> 戻る</button>
+              </div>
+
+              {isSearchingServer ? (
+                <div className="server-loading-container">
+                  <div className="loading-content">
+                    <div className="loading-animation">
+                      <div className="pulse-circle"></div>
+                      <Search size={48} className="floating-search" />
+                    </div>
+                    <h3>サーバー内を探索中...</h3>
+                    <p className="loading-subtext">過去のメールから "{readingEmail.email_address}" を掘り起こしています</p>
+                    <div className="skeleton-lines">
+                      <div className="skeleton-line shadow"></div>
+                      <div className="skeleton-line shadow"></div>
+                      <div className="skeleton-line shadow"></div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="detail-body-scroll" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'hidden' }}>
+                    <div className="detail-header" style={{ flexShrink: 0 }}>
+                      <h2 className="detail-subject">
+                        {readingEmail.isFlagged && <Star size={20} fill="#eab308" color="#eab308" style={{ display: 'inline', marginRight: '8px', verticalAlign: 'text-bottom' }} />}
+                        {readingEmail.subject}
+
+                        {!insightData && (
+                          <button
+                            className="ai-insight-trigger"
+                            onClick={() => analyzeEmailWithGemini(readingEmail, readingEmail.body)}
+                            title="AIで内容を解析"
+                            style={{ marginLeft: '12px' }}
+                            disabled={isAnalyzingInsight}
+                          >
+                            {isAnalyzingInsight ? <RefreshCw size={14} className="spin" color="#8b5cf6" /> : <Sparkles size={14} color="#8b5cf6" fill="#f5f3ff" />}
+                          </button>
+                        )}
+                      </h2>
+                      <div className="detail-meta">
+                        <div className="sender-info">
+                          <span className="sender-name">{readingEmail.from}</span>
+                          <span className="sender-address">{`<${readingEmail.email_address}>`}</span>
+                          <button
+                            className={`inline-search-btn ${isSearchingServer ? 'loading' : ''}`}
+                            onClick={() => handleServerSearch(readingEmail.email_address, 0)}
+                            disabled={isSearchingServer}
+                            title="サーバーからこのアドレスを検索"
+                          >
+                            <Search size={14} />
+                          </button>
+                        </div>
+                        <span>{readingEmail.date}</span>
+                      </div>
+                    </div>
+
+                    {isAnalyzingInsight && !insightData && readingEmail && (
+                      <div style={{ padding: '0 32px 16px 32px', flexShrink: 0 }}>
+                        <div style={{ backgroundColor: 'var(--bg-app)', borderRadius: '8px', padding: '16px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '12px', color: '#8b5cf6' }}>
+                          <RefreshCw size={18} className="spin" />
+                          <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Gemini がメールを解析中...</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {insightData && (
+                      <div style={{ padding: '0 32px 16px 32px', flexShrink: 0 }}>
+                        <div style={{ backgroundColor: 'rgba(139, 92, 246, 0.1)', borderRadius: '8px', padding: '16px', border: '1px solid rgba(139, 92, 246, 0.3)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: insightData.aiScore > 70 ? '#ef4444' : '#8b5cf6' }}>
+                            <Sparkles size={16} />
+                            <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>AI インサイト (重要度スコア: {insightData.aiScore}点)</span>
+                          </div>
+                          <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-main)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{insightData.summary}</p>
+                          {insightData.actions && insightData.actions.length > 0 && (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '12px' }}>
+                              {insightData.actions.map((action, idx) => (
+                                <span key={idx} style={{ backgroundColor: 'var(--bg-main)', border: '1px solid rgba(139, 92, 246, 0.4)', color: '#8b5cf6', padding: '4px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 600 }}>
+                                  {action}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {readingEmail.attachmentsList && readingEmail.attachmentsList.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '0 32px 16px 32px', flexShrink: 0 }}>
+                        {readingEmail.attachmentsList.map((filename, idx) => (
+                          <div
+                            key={`${filename}-${idx}`}
+                            onClick={() => handleDownloadAttachment(filename)}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: '8px',
+                              padding: '8px 14px',
+                              backgroundColor: 'var(--bg-app)',
+                              border: '1px solid var(--border-color)',
+                              borderRadius: '8px',
+                              fontSize: '0.85rem',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s',
+                              color: 'var(--text-main)',
+                              fontWeight: 500
+                            }}
+                            onMouseOver={(e) => {
+                              e.currentTarget.style.backgroundColor = '#e0f2fe';
+                              e.currentTarget.style.borderColor = '#93c5fd';
+                            }}
+                            onMouseOut={(e) => {
+                              e.currentTarget.style.backgroundColor = 'var(--bg-app)';
+                              e.currentTarget.style.borderColor = 'var(--border-color)';
+                            }}
+                            title="クリックしてダウンロード"
+                          >
+                            <Paperclip size={16} color="#3b82f6" />
+                            {filename}
+                            <Download size={14} style={{ marginLeft: '4px', opacity: 0.5 }} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="detail-body" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0 32px 16px 32px' }}>
+                      <iframe
+                        title="Email Content"
+                        srcDoc={readingEmail.body}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          flex: 1,
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '8px',
+                          backgroundColor: '#ffffff'
+                        }}
+                        sandbox="allow-same-origin allow-popups"
+                      />
+                    </div>
+                  </div>
+
+                  {!showReplyForm ? (
+                    <div style={{ flexShrink: 0, padding: '16px 32px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', display: 'flex', gap: '12px' }}>
+                      <button
+                        onClick={() => { setShowReplyForm(true); handleSetReplyType('reply'); }}
+                        style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 24px', borderRadius: '24px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-main)', color: 'var(--text-main)', fontSize: '0.9rem', fontWeight: 500, cursor: 'pointer', transition: 'all 0.2s' }}
+                        onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-header)'}
+                        onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-main)'}
+                      >
+                        <Reply size={18} /> 返信
+                      </button>
+                      <button
+                        onClick={() => { setShowReplyForm(true); handleSetReplyType('replyAll'); }}
+                        style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 24px', borderRadius: '24px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-main)', color: 'var(--text-main)', fontSize: '0.9rem', fontWeight: 500, cursor: 'pointer', transition: 'all 0.2s' }}
+                        onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-header)'}
+                        onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-main)'}
+                      >
+                        <ReplyAll size={18} /> 全員に返信
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ flexShrink: 0, padding: '12px 32px 16px 32px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-header)' }}>
+                      <div className="inline-reply-editor" style={{ margin: 0, backgroundColor: 'var(--bg-main)', border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden' }}>
+
+                        <div className="reply-to-info" style={{ borderBottom: '1px solid var(--border-color)', padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', gap: '16px' }}>
+                            <button
+                              onClick={() => handleSetReplyType('reply')}
+                              style={{ display: 'flex', alignItems: 'center', fontWeight: replyType === 'reply' ? 'bold' : 'normal', color: replyType === 'reply' ? 'var(--text-main)' : 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                            >
+                              <CornerUpLeft size={14} style={{ marginRight: '4px' }} /> 返信
+                            </button>
+                            <button
+                              onClick={() => handleSetReplyType('replyAll')}
+                              style={{ display: 'flex', alignItems: 'center', fontWeight: replyType === 'replyAll' ? 'bold' : 'normal', color: replyType === 'replyAll' ? 'var(--text-main)' : 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                              title="元の宛先(To)全員を含める"
+                            >
+                              <ReplyAll size={14} style={{ marginRight: '4px' }} /> 全員に返信
+                            </button>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <button
+                              onClick={() => setShowReplyCcBcc(!showReplyCcBcc)}
+                              style={{ fontSize: '0.8rem', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}
+                            >
+                              {showReplyCcBcc ? 'Cc/Bccを隠す' : 'Cc/Bccを追加'}
+                            </button>
+                            <button
+                              onClick={() => setShowReplyForm(false)}
+                              title="キャンセル"
+                              style={{ display: 'flex', alignItems: 'center', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px' }}
+                            >
+                              <X size={16} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {showReplyCcBcc && (
+                          <div style={{ display: 'flex', flexDirection: 'column', borderBottom: '1px solid var(--border-color)', padding: '6px 12px', gap: '6px', backgroundColor: 'var(--bg-header)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center' }}>
+                              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', width: '30px' }}>Cc:</span>
+                              <input type="text" value={replyCc} onChange={e => setReplyCc(e.target.value)} disabled={isSending} style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: '0.85rem', color: 'var(--text-main)' }} placeholder="追加の宛先..." />
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center' }}>
+                              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', width: '30px' }}>Bcc:</span>
+                              <input type="text" value={replyBcc} onChange={e => setReplyBcc(e.target.value)} disabled={isSending} style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: '0.85rem', color: 'var(--text-main)' }} placeholder="追加の宛先..." />
+                            </div>
+                          </div>
+                        )}
+
+                        <div style={{ padding: '8px 12px', display: 'flex', gap: '8px', overflowX: 'auto', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)' }}>
+                          <span style={{ display: 'flex', alignItems: 'center', fontSize: '0.8rem', color: '#8b5cf6', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
+                            <Bot size={14} style={{ marginRight: '4px' }} /> AIドラフト:
+                          </span>
+                          <button onClick={() => generateAiReply('承諾する、進めてほしい旨を伝える')} disabled={isGeneratingReply} className="badge badge-update" style={{ cursor: 'pointer', border: 'none', padding: '4px 10px', whiteSpace: 'nowrap' }}>👍 承諾する</button>
+                          <button onClick={() => generateAiReply('丁寧にお断りする')} disabled={isGeneratingReply} className="badge" style={{ cursor: 'pointer', border: 'none', padding: '4px 10px', backgroundColor: 'var(--bg-main)', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border-color)' }}>👎 丁寧に断る</button>
+                          <button onClick={() => generateAiReply('確認したことと、感謝を伝える')} disabled={isGeneratingReply} className="badge" style={{ cursor: 'pointer', border: 'none', padding: '4px 10px', backgroundColor: '#dcfce3', color: '#166534', whiteSpace: 'nowrap' }}>🙏 感謝・確認</button>
+                        </div>
+
+                        <div style={{ position: 'relative' }}>
+                          {isGeneratingReply && (
+                            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'var(--bg-main)', opacity: 0.7, display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 10 }}>
+                              <RefreshCw size={24} className="spin" color="#8b5cf6" />
+                            </div>
+                          )}
+                          <textarea
+                            className="reply-textarea"
+                            placeholder="返信内容を入力..."
+                            value={replyText}
+                            onChange={(e) => setReplyText(e.target.value)}
+                            disabled={isSending || isGeneratingReply}
+                            style={{ minHeight: '120px', border: 'none', backgroundColor: 'transparent' }}
+                          />
+                        </div>
+
+                        <div className="reply-toolbar" style={{ padding: '8px 12px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-header)' }}>
+                          <button className="send-btn" onClick={handleSendReply} disabled={isSending || !replyText.trim() || isGeneratingReply} style={{ height: '32px', fontSize: '0.85rem' }}>
+                            {isSending ? <RefreshCw size={14} className="spin" /> : <Send size={14} />}
+                            {isSending ? '送信中...' : '送信する'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="main-layout-container">
+            <div className="email-list-container">
+              <div className="header">
+                <h2>
+                  {activeFolder === 'inbox' && <Inbox size={24} />}
+                  {activeFolder === 'sent' && <Send size={24} />}
+                  {activeFolder === 'urgent' && <Zap size={24} color="#f59e0b" />}
+                  {activeFolder === 'flagged' && <Star size={24} />}
+                  {activeFolder === 'drafts' && <FileEdit size={24} />}
+                  <span style={{ marginLeft: '8px' }}>
+                    {activeFolder === 'inbox' && '受信トレイ'}
+                    {activeFolder === 'sent' && '送信済み'}
+                    {activeFolder === 'urgent' && '至急対応'}
+                    {activeFolder === 'flagged' && '星付き'}
+                    {activeFolder === 'drafts' && '下書き'}
+                  </span>
+                </h2>
+                <button className="icon-button" onClick={() => fetchEmails(currentPage)} disabled={isRefreshing}>
+                  <RefreshCw size={20} className={isRefreshing ? "spin" : ""} />
+                </button>
+              </div>
+
+              <div className="header-controls" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  {selectedIds.length > 0 ? (
+                    <div className="action-bar animate-in" style={{ margin: 0 }}>
+                      <span className="action-text">{selectedIds.length} 件選択中</span>
+                      <div style={{ width: '1px', height: '20px', backgroundColor: 'var(--border-color)', margin: '0 4px' }}></div>
+                      <button className="icon-button" onClick={() => handleBulkAction('read')} title="既読にする"><CheckCircle size={20} color="#1e40af" /></button>
+                      <button className="icon-button" onClick={() => handleBulkAction('delete')} title="削除する"><Trash2 size={20} color="#b91c1c" /></button>
+                      <button className="icon-button" onClick={() => setSelectedIds([])} title="選択を解除"><X size={20} /></button>
+                    </div>
+                  ) : (
+                    <div className="search-filter-group" style={{ margin: 0 }}>
+                      <div className="search-container">
+                        <Search size={18} className="search-icon" />
+                        <input
+                          type="text"
+                          className="search-input"
+                          placeholder="メールを検索..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                        {searchQuery && (
+                          <button className="search-clear-btn" onClick={() => { setSearchQuery(''); fetchEmails(0); }} title="検索をクリア">
+                            <X size={16} />
+                          </button>
+                        )}
+                      </div>
+                      <button className={`filter-button ${filterUnread ? 'active' : ''}`} onClick={() => setFilterUnread(!filterUnread)}>
+                        {filterUnread && <CheckCircle size={14} />} 未読のみ
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  <span>
+                    {filteredAndSortedEmails.length > 0
+                      ? `${currentPage * PAGE_SIZE + 1} - ${currentDisplayCount} 件`
+                      : "0 件"}
+                  </span>
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <button
+                      className="icon-button"
+                      style={{ padding: '4px', width: '28px', height: '28px' }}
+                      disabled={currentPage === 0 || isRefreshing}
+                      onClick={() => fetchEmails(currentPage - 1)}
+                      title="前のページ"
+                    >
+                      <ChevronLeft size={18} />
+                    </button>
+                    <button
+                      className="icon-button"
+                      style={{ padding: '4px', width: '28px', height: '28px' }}
+                      disabled={!hasMore || isRefreshing}
+                      onClick={() => fetchEmails(currentPage + 1)}
+                      title="次のページ"
+                    >
+                      <ChevronRight size={18} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="list-header list-grid-layout">
+                <div className="header-cell">
+                  <input
+                    type="checkbox"
+                    checked={filteredAndSortedEmails.length > 0 && selectedIds.length === filteredAndSortedEmails.length}
+                    onChange={(e) => setSelectedIds(e.target.checked ? filteredAndSortedEmails.map(m => m.id) : [])}
+                  />
+                </div>
+                <div className="header-cell"></div>
+                <div className="header-cell" style={{ cursor: 'pointer' }} onClick={() => setSortConfig({ key: 'date', direction: sortConfig?.direction === 'asc' ? 'desc' : 'asc' })}>
+                  日時 {renderSortIcon('date')}
+                </div>
+                <div className="header-cell">件名</div>
+                <div className="header-cell">
+                  {activeFolder === 'sent' || activeFolder === 'drafts' ? '送信先' : '送信元'}
+                </div>
+                <div className="header-cell" style={{ justifyContent: 'center' }}>操作</div>
+              </div>
+
+              <div className="email-list">
+                {filteredAndSortedEmails.map((email) => (
+                  <div
+                    key={email.id}
+                    className={`email-list-item list-grid-layout ${!email.isRead ? 'unread' : ''} ${selectedIds.includes(email.id) ? 'selected' : ''} ${readingEmail?.id === email.id ? 'active' : ''}`}
+                    onClick={() => handleSelectEmail(email)}
+                  >
+                    <div className="cell-checkbox" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(email.id)}
+                        onChange={() => setSelectedIds(prev => prev.includes(email.id) ? prev.filter(i => i !== email.id) : [...prev, email.id])}
+                      />
+                    </div>
+                    <div className="cell-flag" onClick={(e) => e.stopPropagation()}>
+                      <button onClick={(e) => toggleFlagStatus(email.id, e)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                        <Star size={16} fill={email.isFlagged ? "#eab308" : "none"} color={email.isFlagged ? "#eab308" : "#9ca3af"} />
+                      </button>
+                    </div>
+                    <div className="cell-date">{email.date}</div>
+
+                    <div className="cell-subject">
+                      {!email.isRead && <span className="unread-dot"></span>}
+                      <span className="subject-text">{email.subject}</span>
+                      <button
+                        className="ai-insight-trigger"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handlePreviewEmail(email);
+                        }}
+                        title="AIで内容を解析"
+                      >
+                        <Sparkles size={14} color="#8b5cf6" fill="#f5f3ff" />
+                      </button>
+                    </div>
+
+                    <div className="cell-from">
+                      {activeFolder === 'sent' || activeFolder === 'drafts'
+                        ? (email.to || email.from)
+                        : email.from}
+                    </div>
+
+                    <div className="cell-actions-container">
+                      <div className="hover-actions" onClick={(e) => e.stopPropagation()}>
+                        <button className="hover-btn" onClick={(e) => toggleReadStatus(email.id, e)} title={email.isRead ? "未読にする" : "既読にする"}><Eye size={18} /></button>
+                        <button className="hover-btn" onClick={(e) => deleteEmail(email.id, e)} title="削除"><Trash2 size={18} /></button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {filteredAndSortedEmails.length === 0 && <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>メールが見つかりません</div>}
+              </div>
+            </div>
+
+            <aside className={`side-drawer ${isDrawerOpen ? 'open' : ''}`}>
+              <div className="drawer-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Sparkles size={18} color="#8b5cf6" />
+                  <span style={{ fontWeight: 700 }}>AI インサイト</span>
+                </div>
+                <button className="icon-button" onClick={() => setIsDrawerOpen(false)}><X size={20} /></button>
+              </div>
+              <div className="drawer-content">
+                {previewEmail && (
+                  <>
+                    <h3 style={{ fontSize: '1.1rem', marginBottom: 8, lineHeight: 1.4 }}>{previewEmail.subject}</h3>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 24 }}>
+                      From: {previewEmail.from}
+                    </div>
+
+                    {isAnalyzingInsight ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 0', color: '#8b5cf6' }}>
+                        <RefreshCw size={32} className="spin" style={{ marginBottom: '16px' }} />
+                        <span style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>Gemini がメールを解析中...</span>
+                      </div>
+                    ) : insightData ? (
+                      <>
+                        <div className="insight-card">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: insightData.aiScore > 70 ? '#ef4444' : '#2563eb', marginBottom: 8 }}>
+                            <Zap size={16} /> <span style={{ fontSize: '0.8rem', fontWeight: 700 }}>重要度スコア: {insightData.aiScore}点</span>
+                          </div>
+                          <p style={{ fontSize: '0.9rem', margin: 0, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                            {insightData.summary}
+                          </p>
+                        </div>
+
+                        {insightData.actions && insightData.actions.length > 0 && (
+                          <div className="ai-section" style={{ marginBottom: 24 }}>
+                            <div className="ai-section-title" style={{ marginBottom: 12 }}>予測されるアクション</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                              {insightData.actions.map((action, idx) => (
+                                <span key={idx} className="badge badge-update" style={{ padding: '6px 12px', borderRadius: '6px' }}>{action}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    ) : null}
+
+                    <div style={{ marginTop: 'auto', paddingTop: '20px' }}>
+                      <button
+                        className="send-btn"
+                        style={{ width: '100%', justifyContent: 'center', height: '44px' }}
+                        onClick={() => handleSelectEmail(previewEmail)}
+                      >
+                        本文を開く
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </aside>
+          </div>
+        )}
+
+        {/* 💡 追加：フローティング新規作成ボタン（今朝の断面オリジナル位置の再現） */}
+        {!readingEmail && (
+          <button
+            onClick={() => setIsComposeOpen(true)}
+            style={{
+              position: 'absolute',
+              bottom: '32px',
+              right: '32px',
+              width: '60px',
+              height: '60px',
+              borderRadius: '30px',
+              backgroundColor: '#2563eb',
+              color: '#fff',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              boxShadow: '0 4px 12px rgba(37, 99, 235, 0.4)',
+              border: 'none',
+              cursor: 'pointer',
+              zIndex: 50,
+              transition: 'transform 0.2s'
+            }}
+            title="新規メール作成"
+            onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+            onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
+          >
+            <Plus size={28} />
+          </button>
+        )}
+
+        {isAddAccountOpen && (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <form onSubmit={handleAddAccountSubmit} style={{ width: '480px', maxWidth: '95%', backgroundColor: 'var(--bg-main)', borderRadius: '12px', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column', gap: '14px', position: 'relative' }}>
+
+              {isAccountSaving && (
+                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'var(--bg-main)', opacity: 0.7, display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 10, borderRadius: '12px' }}>
+                  <RefreshCw size={32} className="spin" color="#2563eb" />
+                </div>
+              )}
+
+              <h3 style={{ margin: 0, fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)' }}><Users size={20} /> 新しいメールアカウントを追加</h3>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>アカウントの識別名 <span style={{ color: 'red' }}>*</span></label>
+                <input type="text" placeholder="例: personal, sub-work" value={newAccName} onChange={e => setNewAccName(e.target.value.trim())} required style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }} />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>メールアドレス <span style={{ color: 'red' }}>*</span></label>
+                <input type="email" placeholder="example@gmail.com" value={newAccEmail} onChange={e => setNewAccEmail(e.target.value.trim())} required style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }} />
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <div style={{ flex: 2 }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>IMAPホスト</label>
+                  <input type="text" value={newAccImapHost} onChange={e => setNewAccImapHost(e.target.value.trim())} style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>ポート</label>
+                  <input type="number" value={newAccImapPort} onChange={e => setNewAccImapPort(Number(e.target.value))} style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }} />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <div style={{ flex: 2 }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>SMTPホスト</label>
+                  <input type="text" value={newAccSmtpHost} onChange={e => setNewAccSmtpHost(e.target.value.trim())} style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>ポート</label>
+                  <input type="number" value={newAccSmtpPort} onChange={e => setNewAccSmtpPort(Number(e.target.value))} style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }} />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '4px' }}>パスワード / アプリパスワード <span style={{ color: 'red' }}>*</span></label>
+                <input type="password" placeholder="••••••••••••" value={newAccPassword} onChange={e => setNewAccPassword(e.target.value)} required style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }} />
+                <p style={{ margin: '4px 0 0 0', fontSize: '0.75rem', color: 'var(--text-muted)' }}>Gmailの場合は、Googleアカウント設定で生成した16桁の「アプリパスワード」を入力してください。</p>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '12px' }}>
+                <button type="button" onClick={() => setIsAddAccountOpen(false)} style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-main)', cursor: 'pointer' }}>キャンセル</button>
+                <button type="submit" className="send-btn" style={{ padding: '8px 16px', borderRadius: '6px' }}>連携を開始する</button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {showSettings && (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)', zIndex: 2000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <div style={{ width: '450px', backgroundColor: 'var(--bg-main)', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}><Settings size={20} /> 設定</h3>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '8px' }}>Gemini API キー (Google AI Studio)</label>
+                <input
+                  type="password"
+                  value={geminiApiKey}
+                  onChange={(e) => setGeminiApiKey(e.target.value)}
+                  placeholder="AI_xxxxxxxxxxxxxxxxxxx..."
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)' }}
+                />
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '8px' }}>
+                  AIインサイトや返信自動生成を使用するには、<a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{ color: '#3b82f6' }}>Google AI Studio</a> から無料で取得したAPIキーを入力してください。キーはブラウザのローカル環境にのみ保存されます。
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '16px' }}>
+                <button onClick={() => setShowSettings(false)} style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-main)', cursor: 'pointer' }}>キャンセル</button>
+                <button onClick={() => { saveApiKey(geminiApiKey); setShowSettings(false); }} className="send-btn" style={{ padding: '8px 16px', borderRadius: '6px' }}>保存して閉じる</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 💡 内村さんが丁寧に実装された「アイコン付き新規メッセージダイアログ」を100%完全再現 */}
+        {isComposeOpen && (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <div style={{ width: '600px', maxWidth: '90%', height: '500px', backgroundColor: 'var(--bg-main)', borderRadius: '12px', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)', overflow: 'hidden' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', backgroundColor: 'var(--bg-header)', borderBottom: '1px solid var(--border-color)' }}>
+                <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-main)' }}>新規メッセージ</h3>
+                <button className="icon-button" onClick={handleCloseCompose}><X size={20} /></button>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '16px 20px', gap: '12px' }}>
+                <input type="text" placeholder="宛先 (例: test@example.com)" value={composeTo} onChange={e => setComposeTo(e.target.value)} disabled={isComposeSending} style={{ width: '100%', padding: '10px 0', border: 'none', borderBottom: '1px solid var(--border-color)', backgroundColor: 'transparent', color: 'var(--text-main)', outline: 'none', fontSize: '0.95rem' }} />
+                <input type="text" placeholder="件名" value={composeSubject} onChange={e => setComposeSubject(e.target.value)} disabled={isComposeSending} style={{ width: '100%', padding: '10px 0', border: 'none', borderBottom: '1px solid var(--border-color)', backgroundColor: 'transparent', color: 'var(--text-main)', outline: 'none', fontSize: '0.95rem', fontWeight: 'bold' }} />
+                <textarea placeholder="本文を入力..." value={composeBody} onChange={e => setComposeBody(e.target.value)} disabled={isComposeSending} style={{ width: '100%', flex: 1, padding: '12px 0', border: 'none', backgroundColor: 'transparent', color: 'var(--text-main)', outline: 'none', resize: 'none', fontSize: '0.95rem', fontFamily: 'inherit' }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 20px', backgroundColor: 'var(--bg-header)', borderTop: '1px solid var(--border-color)' }}>
+                <button className="icon-button" style={{ color: 'var(--text-muted)' }} title="添付ファイル（準備中）"><Paperclip size={18} /></button>
+                <button className="send-btn" onClick={handleComposeSend} disabled={isComposeSending || !composeTo.trim() || !composeBody.trim()} style={{ padding: '8px 24px' }}>
+                  {isComposeSending ? <RefreshCw size={16} className="spin" /> : <Send size={16} />} {isComposeSending ? '送信中...' : '送信する'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {(isRefreshing || isSending || isComposeSending || isDownloading || successMessage || errorMessage) && (
+          <div className="global-loading-overlay" style={{ zIndex: 1100 }}>
+            <div className="global-loading-content">
+              {(isRefreshing || isSending || isComposeSending || isDownloading) && <RefreshCw size={48} className="spin global-loading-spinner" />}
+              <div className="global-loading-text">{successMessage || errorMessage || '処理中...'}</div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
