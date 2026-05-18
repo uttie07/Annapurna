@@ -9,6 +9,7 @@ import {
   Settings, Bot
 } from 'lucide-react';
 import { AccountBar } from './components/AccountBar';
+import { Sidebar } from './components/Sidebar';
 import './App.css';
 
 // 💡 モック環境でテスト・画面改善を行う場合は true、実サーバーに繋ぐ場合は false
@@ -800,36 +801,19 @@ function App() {
         onOpenAddAccount={() => setIsAddAccountOpen(true)}
       />
 
-      <div className="sidebar">
-        <div className="sidebar-title"><MountainSnow size={24} color="#60a5fa" /> Annapurna</div>
-        <div className="sidebar-label">メイン</div>
-        <div className={`sidebar-item ${activeFolder === 'inbox' ? 'active' : ''}`} onClick={() => { setActiveFolder('inbox'); setCurrentPage(0); setReadingEmail(null); setIsDrawerOpen(false); }}>
-          <Inbox size={18} /> 受信トレイ {activeFolder === 'inbox' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}
-        </div>
-        <div className={`sidebar-item ${activeFolder === 'sent' ? 'active' : ''}`} onClick={() => { setActiveFolder('sent'); setCurrentPage(0); setReadingEmail(null); setIsDrawerOpen(false); }}>
-          <Send size={18} /> 送信済み {activeFolder === 'sent' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}
-        </div>
-
-        <div className="sidebar-label">AI Smart</div>
-        <div className={`sidebar-item ${activeFolder === 'urgent' ? 'active' : ''}`} onClick={() => { setActiveFolder('urgent'); setCurrentPage(0); setReadingEmail(null); setIsDrawerOpen(false); }}><Zap size={18} color="#f59e0b" /> 至急対応 {activeFolder === 'urgent' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}</div>
-
-        <div className="sidebar-label">フォルダ</div>
-        <div className={`sidebar-item ${activeFolder === 'flagged' ? 'active' : ''}`} onClick={() => { setActiveFolder('flagged'); setCurrentPage(0); setReadingEmail(null); setIsDrawerOpen(false); }}>
-          <Star size={18} color={activeFolder === 'flagged' ? "#eab308" : "currentColor"} /> 星付き {activeFolder === 'flagged' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}
-        </div>
-        <div className={`sidebar-item ${activeFolder === 'drafts' ? 'active' : ''}`} onClick={() => { setActiveFolder('drafts'); setCurrentPage(0); setReadingEmail(null); setIsDrawerOpen(false); }}>
-          <FileEdit size={18} /> 下書き {activeFolder === 'drafts' && currentDisplayCount > 0 && <span className="sidebar-unread-count">{currentDisplayCount}</span>}
-        </div>
-
-        <div className="theme-toggle-container" style={{ display: 'flex', gap: '8px' }}>
-          <button className="theme-toggle-btn" style={{ flex: 1 }} onClick={() => setIsDarkMode(!isDarkMode)}>
-            {isDarkMode ? <Sun size={18} /> : <Moon size={18} />} {isDarkMode ? 'ライト' : 'ダーク'}
-          </button>
-          <button className="theme-toggle-btn" style={{ width: 'auto', padding: '0 12px' }} onClick={() => setShowSettings(true)} title="設定">
-            <Settings size={18} />
-          </button>
-        </div>
-      </div>
+      <Sidebar
+        activeFolder={activeFolder}
+        currentDisplayCount={currentDisplayCount}
+        isDarkMode={isDarkMode}
+        onSelectFolder={(folderName) => {
+          setActiveFolder(folderName);
+          setCurrentPage(0);
+          setReadingEmail(null);
+          setIsDrawerOpen(false);
+        }}
+        onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
+        onOpenSettings={() => setShowSettings(true)}
+      />
 
       <div className="main-content" style={{ position: 'relative' }}>
         {readingEmail ? (
