@@ -1,3 +1,4 @@
+import React from 'react';
 import { Users, RefreshCw } from 'lucide-react';
 
 /**
@@ -46,7 +47,7 @@ interface AddAccountModalProps {
   /** SMTPサーバーのホスト名を更新するセッター関数 */
   setNewAccSmtpHost: (host: string) => void;
   
-  /** SMTPサーバーのポート番号を更新するセッター関数 */
+  /** SMTPサーバーのポート番号を更新するセッター番号 */
   setNewAccSmtpPort: (port: number) => void;
   
   /** パスワードを更新するセッター関数 */
@@ -57,9 +58,10 @@ interface AddAccountModalProps {
   
   /**
    * フォーム送信（連携開始）時に実行されるサブミットハンドラー関数
+   * ✨ 親側の汎用 FormEvent と 100% 適合するよう、特定のElementに依存しない型として定義
    * @param e フォーム送信イベントオブジェクト
    */
-  handleAddAccountSubmit: (e: React.FormEvent) => void;
+  handleAddAccountSubmit: (e: React.FormEvent<any>) => void | Promise<void>;
 }
 
 /**
