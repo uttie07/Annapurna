@@ -1,3 +1,4 @@
+import { useState, useEffect, useRef } from 'react';
 import {
   ArrowLeft, RefreshCw, Sparkles, Zap, MessageSquare,
   CornerUpLeft, Reply, ReplyAll, Send, Paperclip, Download
@@ -131,6 +132,71 @@ interface EmailDetailProps {
 }
 
 /**
+ * ✨ 追加: HTMLメールをアプリケーションのCSSから完全に隔離して安全にレンダリングする
+ * サンドボックス付き iframe コンポーネント。コンテンツ高さを検知して二重スクロールを防ぎます。
+ */
+function SafeHtmlViewer({ htmlContent }: { htmlContent: string }) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [iframeHeight, setIframeHeight] = useState<string>('150px');
+
+  useEffect(() => {
+    const handleResize = () => {
+      const iframe = iframeRef.current;
+      if (iframe && iframe.contentWindow && iframe.contentDocument) {
+        const body = iframe.contentDocument.body;
+        const html = iframe.contentDocument.documentElement;
+        
+        // 崩れを防ぐため、内包される要素の最も正確な最大高さを動的算出
+        const height = Math.max(
+          body.scrollHeight,
+          body.offsetHeight,
+          html.clientHeight,
+          html.scrollHeight,
+          html.offsetHeight
+        );
+        
+        setIframeHeight(`${height + 24}px`); // わずかなクリッピングも防ぐバッファ余白を追加
+      }
+    };
+
+    const iframe = iframeRef.current;
+    if (iframe) {
+      iframe.addEventListener('load', handleResize);
+      // 初回ロード完了時だけでなく、インライン画像等の読み込み遅延に対応するため再計算
+      setTimeout(handleResize, 100);
+    }
+
+    return () => {
+      if (iframe) {
+        iframe.removeEventListener('load', handleResize);
+      }
+    };
+  }, [htmlContent]);
+
+  return (
+    <iframe
+      ref={iframeRef}
+      title="Email Content Sandbox"
+      /* * 🛡️ sandbox 属性による厳格なセキュリティ分離:
+       * allow-same-origin のみを許可し、allow-scripts を意図的に排除。
+       * これにより、メールに埋め込まれた有害な JavaScript の実行をフロントエンド側で100%遮断します。
+       */
+      sandbox="allow-same-origin"
+      srcDoc={htmlContent}
+      style={{
+        width: '100%',
+        height: iframeHeight,
+        border: 'none',
+        backgroundColor: '#ffffff', // メール本文のベース背景を白に固定し、ダークモードの干渉を防止
+        borderRadius: '6px',
+        display: 'block',
+        transition: 'height 0.15s ease'
+      }}
+    />
+  );
+}
+
+/**
  * アプリケーションの右側メインエリアに描画される、メール詳細表示およびAIアシスタントコンポーネント。
  * 本文表示、添付ファイル操作、Geminiインサイト、およびAIアシスト付き返信フォームを一元管理します。
  * @component
@@ -255,19 +321,17 @@ export function EmailDetail({
           )}
 
           {/* ✉️ メール本文レンダリング領域 */}
-          <div className="email-body-wrapper" style={{ position: 'relative', minHeight: '150px' }}>
+          <div className="email-body-wrapper" style={{ position: 'relative', minHeight: '150px', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '16px', backgroundColor: '#ffffff' }}>
             {isReadingContent ? (
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 0', color: 'var(--text-muted)', gap: '12px' }}>
                   <RefreshCw size={28} className="spin" />
                   <span style={{ fontSize: '0.85rem' }}>安全なサンドボックスに本文をロード中...</span>
                 </div>
             ) : (
-                /* HTMLマークアップを安全にインジェクション。CSSはApp.css側のスタイルシートを適用 */
-                <div
-                    className="email-html-body"
-                    dangerouslySetInnerHTML={{ __html: readingEmail.body }}
-                    style={{ color: 'var(--text-main)', lineHeight: 1.6 }}
-                />
+                /* ✨ 改善成功: 危険な dangerouslySetInnerHTML を完全廃止。
+                 * アプリ全体のスタイル汚染（干渉崩れ）を防ぎ、XSSを抑え込む隔離コンポーネントへ差し替え。 
+                 */
+                <SafeHtmlViewer htmlContent={readingEmail.body} />
             )}
           </div>
 
@@ -316,7 +380,7 @@ export function EmailDetail({
                     <button onClick={() => handleSetReplyType('reply')} style={{ padding: '6px 12px', borderRadius: '4px 0 0 4px', border: '1px solid var(--border-color)', borderRight: 'none', backgroundColor: replyType === 'reply' ? 'var(--bg-selected)' : 'transparent', fontWeight: replyType === 'reply' ? 700 : 'normal', fontSize: '0.8rem', cursor: 'pointer', color: 'var(--text-main)' }}>
                       <Reply size={12} style={{ marginRight: '4px' }} /> 返信
                     </button>
-                    <button onClick={() => handleSetReplyType('replyAll')} style={{ padding: '6px 12px', borderRadius: '0 4px 4px 0', border: '1px solid var(--border-color)', backgroundColor: replyType === 'replyAll' ? 'var(--bg-selected)' : 'transparent', fontWeight: replyType === 'replyAll' ? 700 : 'normal', fontSize: '0.8 scholarly', cursor: 'pointer', color: 'var(--text-main)' }}>
+                    <button onClick={() => handleSetReplyType('replyAll')} style={{ padding: '6px 12px', borderRadius: '0 4px 4px 0', border: '1px solid var(--border-color)', backgroundColor: replyType === 'replyAll' ? 'var(--bg-selected)' : 'transparent', fontWeight: replyType === 'replyAll' ? 700 : 'normal', fontSize: '0.8rem', cursor: 'pointer', color: 'var(--text-main)' }}>
                       <ReplyAll size={12} style={{ marginRight: '4px' }} /> 全員に返信
                     </button>
                   </div>
@@ -364,13 +428,13 @@ export function EmailDetail({
 
                 {/* メインの返信テキストエリア */}
                 <div style={{ position: 'relative' }}>
-              <textarea
-                  rows={8}
-                  value={replyText}
-                  onChange={e => setReplyText(e.target.value)}
-                  placeholder="ここに返信メッセージを入力、または上のAIボタンで文面を自動生成してください..."
-                  style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)', fontSize: '0.9rem', lineHeight: 1.5, resize: 'vertical', fontFamily: 'sans-serif' }}
-              />
+                  <textarea
+                      rows={8}
+                      value={replyText}
+                      onChange={e => setReplyText(e.target.value)}
+                      placeholder="ここに返信メッセージを入力、または上のAIボタンで文面を自動生成してください..."
+                      style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)', fontSize: '0.9rem', lineHeight: 1.5, resize: 'vertical', fontFamily: 'sans-serif' }}
+                  />
                 </div>
 
                 {/* フォームフッター（キャンセル ＆ 送信） */}
