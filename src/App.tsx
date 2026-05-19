@@ -629,7 +629,7 @@ function App() {
                   onClick={() => setIsComposeOpen(true)}
                   style={{
                     position: 'absolute',
-                    bottom: '32px',
+                    bottom: '80px',
                     right: '32px',
                     width: '60px',
                     height: '60px',
