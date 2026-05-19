@@ -240,6 +240,7 @@ function App() {
 
   const handleSetReplyType = (type: 'reply' | 'replyAll') => {
     setReplyType(type);
+    setShowReplyForm(true);
 
     if (!gemini.replyText.trim() && readingEmail) {
       const tempDiv = document.createElement("div");
