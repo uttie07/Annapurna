@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-    MountainSnow, Inbox, Send, Zap, Star, FileEdit, Trash2,
+    MountainSnow, Inbox, Send, Star, FileEdit, Trash2,
     Folder, Sun, Moon, Settings, ChevronDown, ChevronRight
 } from 'lucide-react';
 
@@ -144,10 +144,6 @@ export function Sidebar({
             <div className="sidebar-title">
                 <MountainSnow size={24} color="#60a5fa" /> Annapurna
             </div>
-
-            {/* 1. AI スマート判定エリア */}
-            <div className="sidebar-label">AI Smart</div>
-            {renderSidebarItem('urgent', <Zap size={18} color="#f59e0b" />, '至急対応')}
 
             {/* 2. メインメールボックスエリア（常時表示） */}
             <div className="sidebar-label">メールボックス</div>
