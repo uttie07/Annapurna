@@ -13,6 +13,9 @@ use email::envelope::flag::remove::RemoveFlags;
 use email::flag::{Flag, Flags};
 use email::message::delete::DeleteMessages;
 
+// ✨ 追加: フォルダ一覧を取得するためのemail-libのトレイトをインポート
+use email::folder::list::ListFolders;
+
 use email::smtp::{SmtpContextBuilder, config::SmtpConfig};
 use email::message::send::SendMessage;
 use email::message::add::AddMessage;
@@ -208,6 +211,37 @@ message.send.backend.auth.raw = "{4}"
         .map_err(|e| format!("設定ファイルへの書き込みに失敗しました: {}", e))?;
 
     Ok(())
+}
+
+// ✨ 新設: フロントエンドの動的サイドバーに連動し、IMAPサーバーからフォルダ一覧を丸ごと引き抜くコマンド
+#[tauri::command]
+async fn get_folders(account: String) -> Result<Vec<String>, String> {
+    let toml_data = load_annapurna_toml()?;
+    let raw_account = toml_data.accounts.get(&account).ok_or_else(|| "アカウントが見つかりません".to_string())?;
+
+    let account_config = Arc::new(build_core_account_config(&account, raw_account));
+    let imap_config = Arc::new(raw_account.backend.clone());
+
+    let ctx_builder = ImapContextBuilder::new(Arc::clone(&account_config), Arc::clone(&imap_config));
+
+    let backend = BackendBuilder::new(Arc::clone(&account_config), ctx_builder)
+        .build()
+        .await
+        .map_err(|e| format!("フォルダ取得用バックエンド接続失敗: {:#?}", e))?;
+
+    // email-libのlist_foldersAPIを叩いて全フォルダ構造を取得
+    let folders_list = backend
+        .list_folders()
+        .await
+        .map_err(|e| format!("サーバーのフォルダ一覧取得失敗: {:#?}", e))?;
+
+    // 取得したフォルダー群から名前（String型）だけを抽出してフラットな配列にマッピング
+    let folder_names = folders_list
+        .into_iter()
+        .map(|f| f.name)
+        .collect();
+
+    Ok(folder_names)
 }
 
 #[tauri::command]
@@ -529,6 +563,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_accounts,
             add_account,
+            get_folders, // ✨ 忘れずにハンドラー一覧に登録！
             get_emails,
             get_email_content,
             search_emails_on_server,

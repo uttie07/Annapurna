@@ -36,6 +36,8 @@ function App() {
   const [accounts, setAccounts] = useState<string[]>([]);
   const [activeAccount, setActiveAccount] = useState<string>('');
 
+  // ✨ 固定からシフト: アカウントごとにサーバーから一律取得するフォルダ一覧State
+  const [folders, setFolders] = useState<string[]>([]);
   const [activeFolder, setActiveFolder] = useState<string>('inbox');
   const [isDarkMode, setIsDarkMode] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
   const emailHook = useEmails({ activeAccount, activeFolder });
@@ -104,6 +106,40 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ✨ 追加: アクティブアカウント変更時に、そのサーバーのフォルダ構成を一律動的にフェッチする
+  useEffect(() => {
+    const loadFoldersForAccount = async () => {
+      if (!activeAccount) return;
+
+      const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
+      if (isTauri) {
+        try {
+          // Rust側からString配列でフォルダ一覧（例: ["INBOX", "Sent", "Drafts", "Junk", "CustomFolder"])を取得
+          const fetchedFolders = await invoke('get_folders', { account: activeAccount }) as string[];
+          setFolders(fetchedFolders);
+
+          // 現在選択中のフォルダが新しい一覧にない場合、先頭のフォルダに安全にフォールバック
+          if (fetchedFolders.length > 0 && !fetchedFolders.includes(activeFolder)) {
+            setActiveFolder(fetchedFolders[0]);
+          }
+        } catch (error) {
+          console.error("Failed to fetch folders:", error);
+          // 失敗時は最低限の基本フォルダー構造を確保してフォールバック
+          setFolders(['inbox', 'sent', 'drafts']);
+        }
+      } else {
+        // モック環境下でのアカウント別フォルダのダミー切り替え挙動
+        if (activeAccount === 'work') {
+          setFolders(['inbox', 'Sent Items', 'drafts', 'プログラミング', '重要案件']);
+        } else {
+          setFolders(['inbox', '[Gmail]/送信済みトレイ', 'drafts', 'メルマガ', 'プライベート']);
+        }
+      }
+    };
+
+    loadFoldersForAccount().catch(err => console.error("Folder load error:", err));
+  }, [activeAccount]);
+
   const handlePreviewEmail = async (email: Email) => {
     setPreviewEmail(email);
     gemini.setInsightData(null);
@@ -131,7 +167,7 @@ function App() {
       gemini.setInsightData(null);
     }
 
-    if (activeFolder === 'drafts') {
+    if (activeFolder.toLowerCase().includes('draft')) {
       setIsComposeOpen(true);
       setComposeTo(email.to || email.from || '');
       setComposeCc('');
@@ -156,7 +192,7 @@ function App() {
         } catch (error) {
           console.error(error);
           alert("下書きの読み込みに失敗しました");
-        } finally { // ✨ 'military:' タイポを 'finally' に完全修正！
+        } finally {
           // 必要に応じたクリーンアップ処理をここに記述
         }
       } else {
@@ -323,7 +359,7 @@ function App() {
         setComposeSubject('');
         setComposeBody('');
         setComposingDraftId(null);
-        if (activeFolder === 'drafts') {
+        if (activeFolder.toLowerCase().includes('draft')) {
           emailHook.fetchEmails(0).catch(err => console.error(err));
         }
       }, 1500);
@@ -354,7 +390,7 @@ function App() {
           }
 
           setSuccessMessage("下書きを保存しました");
-          if (activeFolder === 'drafts') {
+          if (activeFolder.toLowerCase().includes('draft')) {
             emailHook.fetchEmails(0).catch(err => console.error(err));
           }
           setTimeout(() => setSuccessMessage(null), 1500);
@@ -424,14 +460,14 @@ function App() {
   };
 
   const getFolderDisplayLabel = (folderName: string): string => {
-    switch (folderName) {
-      case 'inbox': return '受信トレイ';
-      case 'sent': return '送信済み';
-      case 'urgent': return '至急対応';
-      case 'flagged': return '星付き';
-      case 'drafts': return '下書き';
-      default: return folderName;
-    }
+    // サーバー固有のフォルダ名表記を考慮し、部分一致または判定ロジックを最適化
+    const normalized = folderName.toLowerCase();
+    if (normalized === 'inbox') return '受信トレイ';
+    if (normalized.includes('sent')) return '送信済み';
+    if (normalized.includes('draft')) return '下書き';
+    if (normalized.includes('flagged') || normalized.includes('star')) return '星付き';
+    if (normalized === 'urgent') return '至急対応';
+    return folderName; // ユーザーカスタムフォルダ名はそのまま返却
   };
 
   const handleAddAccountSubmit = async (formEvent: React.FormEvent) => {
@@ -491,6 +527,7 @@ function App() {
         />
 
         <Sidebar
+            folders={folders} // ✨ 新設した動的フォルダ一覧配列をバインド
             activeFolder={activeFolder}
             currentDisplayCount={emailHook.currentDisplayCount}
             isDarkMode={isDarkMode}
@@ -529,7 +566,6 @@ function App() {
                   setShowReplyCcBcc={setShowReplyCcBcc}
                   setReplyCc={setReplyCc}
                   setReplyBcc={setReplyBcc}
-                  // ✨ useGemini側の2つの引数 (readingEmail, intent) のシグネチャに完全整合
                   generateAiReply={(intent) => gemini.generateAiReply(readingEmail, intent)}
                   setReplyText={gemini.setReplyText}
                   handleSendReply={handleSendReply}
