@@ -159,9 +159,9 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps): UseE
    * アクティブなフォルダ名をIMAPの物理フォルダ名にマッピング
    */
   const getServerFolder = (): string => {
-    if (activeFolder === "sent") return "sent";
-    if (activeFolder === "drafts") return "drafts";
-    return "INBOX";
+    // フロントエンド内部の初期値 'inbox' だけ標準の 'INBOX' に補正
+    if (activeFolder === "inbox") return "INBOX";
+    return activeFolder;
   };
 
   /**
