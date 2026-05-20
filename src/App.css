@@ -1080,3 +1080,35 @@ body {
   font-weight: 700;
   color: var(--text-main);
 }
+
+/* ====================================================================
+   ✨ サイドバー専用：プロ仕様の極細カスタムスクロールバー
+   ==================================================================== */
+
+/* 1. スクロールバー全体の幅を設定（細めの6px） */
+.sidebar-custom-folders-container::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+/* 2. スクロールバーの背景（トラック）を透明にして完全に溶け込ませる */
+.sidebar-custom-folders-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 3. 動かすつまみ（ハンドル）の部分。初期状態はかなり薄い色に */
+.sidebar-custom-folders-container::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: 10px; /* 角を丸めてモダンに */
+  transition: background-color 0.2s ease;
+}
+
+/* 4. マウスがスクロールエリア（またはサイドバー全体）に乗ったときだけ、少し見やすく浮き上がらせる */
+.sidebar-custom-folders-container:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.25);
+}
+
+/* 5. つまみをドラッグしている最中の色 */
+.sidebar-custom-folders-container::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.4);
+}
