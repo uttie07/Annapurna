@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { useEffect, useState } from 'react';
 import {
-  Sparkles, RefreshCw, Plus, X, Zap, ChevronUp, ChevronDown
+  Sparkles, RefreshCw, Plus, X, Zap, ChevronUp, ChevronDown, Settings
 } from 'lucide-react';
 import { AccountBar } from './components/AccountBar';
 import { Sidebar } from './components/Sidebar';
@@ -76,6 +76,16 @@ function App() {
   const [previewEmail, setPreviewEmail] = useState<Email | null>(null);
   const [isSearchingServer, setIsSearchingServer] = useState(false);
 
+  // 🛠️ APIキー編集用ダイアログのためのローカル入力用State
+  const [localApiKey, setLocalApiKey] = useState<string>('');
+
+  // モーダルが開かれたタイミングで、useGemini 内の最新の API キーを同期
+  useEffect(() => {
+    if (gemini.showSettings) {
+      setLocalApiKey(gemini.geminiApiKey);
+    }
+  }, [gemini.showSettings, gemini.geminiApiKey]);
+
   useEffect(() => {
     if (isDarkMode) document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
@@ -140,6 +150,15 @@ function App() {
     loadFoldersForAccount().catch(err => console.error("Folder load error:", err));
   }, [activeAccount]);
 
+  // 💡 安全にフォルダー名の文字列を解決して取得するヘルパー関数
+  const resolveTargetFolder = (): string => {
+    try {
+      return emailHook.getServerFolder();
+    } catch {
+      return activeFolder;
+    }
+  };
+
   const handlePreviewEmail = async (email: Email) => {
     setPreviewEmail(email);
     gemini.setInsightData(null);
@@ -149,7 +168,7 @@ function App() {
     if (isTauri) {
       gemini.setIsAnalyzingInsight(true);
       try {
-        const serverFolder = emailHook.getServerFolder();
+        const serverFolder = resolveTargetFolder();
         const contentResponse = await invoke<EmailDetailResponse>('get_email_content', { account: activeAccount, folder: serverFolder, id: email.id });
         await gemini.analyzeEmailWithGemini(email, contentResponse.body);
       } catch (error) {
@@ -179,7 +198,7 @@ function App() {
       const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
       if (isTauri) {
         try {
-          const serverFolder = emailHook.getServerFolder();
+          const serverFolder = resolveTargetFolder();
           const contentResponse = await invoke<EmailDetailResponse>('get_email_content', { account: activeAccount, folder: serverFolder, id: email.id });
 
           let rawBody = contentResponse.body;
@@ -215,7 +234,7 @@ function App() {
     const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
     if (isTauri) {
       try {
-        const serverFolder = emailHook.getServerFolder();
+        const serverFolder = resolveTargetFolder();
         const contentResponse = await invoke<EmailDetailResponse>('get_email_content', { account: activeAccount, folder: serverFolder, id: email.id });
 
         let formattedBody = contentResponse.body;
@@ -247,7 +266,7 @@ function App() {
     if (!readingEmail) return;
     setIsDownloading(true);
     try {
-      const serverFolder = emailHook.getServerFolder();
+      const serverFolder = resolveTargetFolder();
       const bytes = await invoke<number[]>('download_attachment', {
         account: activeAccount,
         folder: serverFolder,
@@ -415,7 +434,7 @@ function App() {
 
     if (isTauri) {
       try {
-        const serverFolder = emailHook.getServerFolder();
+        const serverFolder = resolveTargetFolder();
         const response = await invoke('search_emails_on_server', { account: activeAccount, folder: serverFolder, address, page, pageSize: emailHook.PAGE_SIZE }) as { emails: Array<{ id: number | string, subject?: string, from: string, to?: string, date: string, flags?: string[] }>, totalCount: number };
 
         const searchResults: Email[] = response.emails.map((e) => {
@@ -509,6 +528,14 @@ function App() {
   const renderSortIcon = (k: keyof Email) => {
     if (emailHook.sortConfig?.key !== k) return <ChevronDown size={14} color="#ccc" />;
     return emailHook.sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />;
+  };
+
+  // 🛠️ APIキーを永続化保存し、モーダルを閉じるためのハンドラー
+  const handleSaveSettings = () => {
+    if (localApiKey.trim()) {
+      gemini.saveApiKey(localApiKey);
+    }
+    gemini.setShowSettings(false);
   };
 
   const currentEmailId = readingEmail ? readingEmail.id : null;
@@ -658,6 +685,65 @@ function App() {
                     )}
                   </div>
                 </aside>
+              </div>
+          )}
+
+          {/* 🛠️ 修正：position: fixed を明示的に指定し、確実に画面最前面（ウィンドウ中央）へ浮き上がるように変更 */}
+          {gemini.showSettings && (
+              <div
+                  className="modal-overlay"
+                  style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    width: '100vw',
+                    height: '100vh',
+                    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 9999
+                  }}
+                  onClick={() => gemini.setShowSettings(false)}
+              >
+                <div
+                    className="modal-content"
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      backgroundColor: 'var(--bg-card, #ffffff)',
+                      padding: '24px',
+                      maxWidth: '500px',
+                      width: '90%',
+                      borderRadius: '12px',
+                      boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+                      border: '1px solid var(--border-color, #e5e7eb)'
+                    }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold', fontSize: '1.2rem', color: 'var(--text-main, #111827)' }}>
+                      <Settings size={20} /> Gemini API 設定
+                    </div>
+                    <button className="icon-button" onClick={() => gemini.setShowSettings(false)}><X size={20} /></button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '6px', color: 'var(--text-main, #111827)' }}>API キー</label>
+                      <input
+                          type="password"
+                          value={localApiKey}
+                          onChange={(e) => setLocalApiKey(e.target.value)}
+                          placeholder="AI Studio で発行した API キーを入力"
+                          style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-color, #d1d5db)', backgroundColor: 'var(--bg-input, #ffffff)', color: 'var(--text-main, #111827)' }}
+                      />
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted, #6b7280)', lineHeight: '1.5' }}>
+                      ※ APIキーはローカル環境に安全に保存され、直接 Google Gemini API との通信のみに使用されます。
+                    </div>
+                  </div>
+                  <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end' }}>
+                    <button className="send-btn" onClick={handleSaveSettings}>保存して閉じる</button>
+                  </div>
+                </div>
               </div>
           )}
 
