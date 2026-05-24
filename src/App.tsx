@@ -128,9 +128,15 @@ function App() {
           const fetchedFolders = await invoke('get_folders', { account: activeAccount }) as string[];
           setFolders(fetchedFolders);
 
-          // 現在選択中のフォルダが新しい一覧にない場合、先頭のフォルダに安全にフォールバック
-          if (fetchedFolders.length > 0 && !fetchedFolders.includes(activeFolder)) {
-            setActiveFolder(fetchedFolders[0]);
+          if (fetchedFolders.length > 0) {
+            // 💡 改善: 大文字小文字を問わず、配列内に "INBOX" や "inbox" が存在するか探します
+            const serverInbox = fetchedFolders.find(f => f.toLowerCase() === 'inbox');
+
+            // 起動直後、または現在のフォルダが取得リストに存在しない、あるいは初期設定状態の時はフォールバック
+            if (!activeFolder || !fetchedFolders.includes(activeFolder) || activeFolder === "inbox") {
+              // サーバー側に INBOX があればそれを最優先で選択、なければ配列の先頭 [0] を選択してTrashなどへのズレを防止
+              setActiveFolder(serverInbox || fetchedFolders[0]);
+            }
           }
         } catch (error) {
           console.error("Failed to fetch folders:", error);

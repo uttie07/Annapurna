@@ -159,8 +159,11 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps): UseE
    * アクティブなフォルダ名をIMAPの物理フォルダ名にマッピング
    */
   const getServerFolder = (): string => {
-    // フロントエンド内部の初期値 'inbox' だけ標準の 'INBOX' に補正
-    if (activeFolder === "inbox") return "INBOX";
+// 🛠️ 修正: 空文字、undefined、または 'inbox' (小文字) の場合は
+    // 全てサーバーが100%認識できる大文字の "INBOX" に強制変換します
+    if (!activeFolder || activeFolder.toLowerCase() === "inbox" || activeFolder.trim() === "") {
+      return "INBOX";
+    }
     return activeFolder;
   };
 
