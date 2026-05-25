@@ -1,5 +1,5 @@
-import React from 'react';
-import { Search, RefreshCw, ChevronLeft, ChevronRight, CheckCircle, Trash2, ShieldAlert, Star } from 'lucide-react';
+import React, { useRef } from 'react';
+import { Search, RefreshCw, ChevronLeft, ChevronRight, CheckCircle, Trash2, ShieldAlert, Star, X } from 'lucide-react';
 
 /**
  * メールデータのオブジェクト構造定義
@@ -109,6 +109,9 @@ interface EmailListProps {
 
     /** 特定のメールを削除（ゴミ箱へ移動）する関数 */
     deleteEmail: (id: string, e: React.MouseEvent) => Promise<void>;
+
+    /** 親フック側で定義した通常一覧への物理再フェッチ関数 */
+    clearSearchAndRefresh: () => Promise<void>;
 }
 
 /**
@@ -133,15 +136,12 @@ export function EmailList({
                               setSearchQuery,
                               setFilterUnread,
                               setSelectedIds,
-                              handleBulkAction,
-                              setSortConfig,
-                              renderSortIcon,
-                              handleSelectEmail,
-                              toggleFlagStatus,
-                              handlePreviewEmail,
-                              toggleReadStatus,
-                              deleteEmail,
+                              handleBulkAction, setSortConfig, renderSortIcon, handleSelectEmail,
+                              toggleFlagStatus, handlePreviewEmail, toggleReadStatus, deleteEmail,
+                              clearSearchAndRefresh,
                           }: EmailListProps) {
+
+    const inputRef = useRef<HTMLInputElement>(null);
 
     const handleSortClick = (key: keyof Email) => {
         if (sortConfig?.key === key) {
@@ -163,14 +163,19 @@ export function EmailList({
         }
     };
 
-    /**
-     * 個別のメールのチェックボックスが切り替わった際のハンドラー
-     * ✨ 未使用のパラメーター 'e' を完全に削除して警告を解消
-     */
     const handleSelectRowToggle = (id: string) => {
         setSelectedIds(prev =>
             prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
         );
+    };
+
+    // 🛠️ 修正: ×ボタン押下時に、サーバーの通常受信トレイ一覧(0ページ目)を強制再取得させる
+    const handleClearSearch = async () => {
+        if (inputRef.current) {
+            inputRef.current.value = '';
+            inputRef.current.focus();
+        }
+        await clearSearchAndRefresh(); // 大元の検索文字クリア ＋ IMAPサーバーからの全件リロードを同期
     };
 
     return (
@@ -184,16 +189,31 @@ export function EmailList({
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, justifyContent: 'flex-end' }}>
-                    <div style={{ position: 'relative', width: '280px' }}>
-                        <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    <div style={{ position: 'relative', width: '280px', display: 'flex', alignItems: 'center' }}>
+                        <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
                         <input
+                            ref={inputRef}
                             type="text"
                             placeholder="メールを検索..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            style={{ width: '100%', padding: '8px 12px 8px 36px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)', fontSize: '0.875rem' }}
+                            style={{ width: '100%', padding: '8px 36px 8px 36px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)', fontSize: '0.875rem', outline: 'none' }}
                             aria-label="メールを検索"
                         />
+                        {searchQuery && (
+                            <button
+                                onClick={handleClearSearch}
+                                className="search-clear-btn"
+                                title="検索キーワードをクリア"
+                                style={{
+                                    position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)',
+                                    background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px', borderRadius: '50%'
+                                }}
+                            >
+                                <X size={14} />
+                            </button>
+                        )}
                     </div>
 
                     <button
@@ -284,7 +304,6 @@ export function EmailList({
                                     <td style={{ padding: '12px 16px', textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
                                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px' }}>
 
-                                            {/* 🌟 星付き（フラグ）切り替えボタン */}
                                             <button
                                                 onClick={(e) => toggleFlagStatus(email.id, e)}
                                                 className="action-icon-btn"
@@ -296,7 +315,6 @@ export function EmailList({
                                                 <Star size={16} fill={email.isFlagged ? '#eab308' : 'none'} strokeWidth={2} />
                                             </button>
 
-                                            {/* 👁️ AIクイックインサイト用プレビューボタン */}
                                             <button
                                                 onClick={() => handlePreviewEmail(email)}
                                                 className="action-icon-btn"
@@ -314,7 +332,6 @@ export function EmailList({
                                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0z"/><circle cx="12" cy="12" r="3"/></svg>
                                             </button>
 
-                                            {/* ✉️ 既読/未読切り替えボタン */}
                                             <button
                                                 onClick={(e) => toggleReadStatus(email.id, e)}
                                                 className="action-icon-btn"
@@ -330,7 +347,6 @@ export function EmailList({
                                                 )}
                                             </button>
 
-                                            {/* 🗑️ 削除ボタン */}
                                             <button
                                                 onClick={(e) => deleteEmail(email.id, e)}
                                                 className="action-icon-btn"

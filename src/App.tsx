@@ -36,7 +36,6 @@ function App() {
   const [accounts, setAccounts] = useState<string[]>([]);
   const [activeAccount, setActiveAccount] = useState<string>('');
 
-  // ✨ 固定からシフト: アカウントごとにサーバーから一律取得するフォルダ一覧State
   const [folders, setFolders] = useState<string[]>([]);
   const [activeFolder, setActiveFolder] = useState<string>('inbox');
   const [isDarkMode, setIsDarkMode] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -76,10 +75,8 @@ function App() {
   const [previewEmail, setPreviewEmail] = useState<Email | null>(null);
   const [isSearchingServer, setIsSearchingServer] = useState(false);
 
-  // 🛠️ APIキー編集用ダイアログのためのローカル入力用State
   const [localApiKey, setLocalApiKey] = useState<string>('');
 
-  // モーダルが開かれたタイミングで、useGemini 内の最新の API キーを同期
   useEffect(() => {
     if (gemini.showSettings) {
       setLocalApiKey(gemini.geminiApiKey);
@@ -91,7 +88,6 @@ function App() {
     else document.documentElement.classList.remove('dark');
   }, [isDarkMode]);
 
-  // 初期ロード用の非同期関数を定義
   useEffect(() => {
     const loadConfigAccounts = async () => {
       const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
@@ -113,10 +109,8 @@ function App() {
     };
 
     loadConfigAccounts().catch(err => console.error("Account load unhandled:", err));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✨ 追加: アクティブアカウント変更時に、そのサーバーのフォルダ構成を一律動的にフェッチする
   useEffect(() => {
     const loadFoldersForAccount = async () => {
       if (!activeAccount) return;
@@ -124,27 +118,21 @@ function App() {
       const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
       if (isTauri) {
         try {
-          // Rust側からString配列でフォルダ一覧（例: ["INBOX", "Sent", "Drafts", "Junk", "CustomFolder"])を取得
           const fetchedFolders = await invoke('get_folders', { account: activeAccount }) as string[];
           setFolders(fetchedFolders);
 
           if (fetchedFolders.length > 0) {
-            // 💡 改善: 大文字小文字を問わず、配列内に "INBOX" や "inbox" が存在するか探します
             const serverInbox = fetchedFolders.find(f => f.toLowerCase() === 'inbox');
 
-            // 起動直後、または現在のフォルダが取得リストに存在しない、あるいは初期設定状態の時はフォールバック
             if (!activeFolder || !fetchedFolders.includes(activeFolder) || activeFolder === "inbox") {
-              // サーバー側に INBOX があればそれを最優先で選択、なければ配列の先頭 [0] を選択してTrashなどへのズレを防止
               setActiveFolder(serverInbox || fetchedFolders[0]);
             }
           }
         } catch (error) {
           console.error("Failed to fetch folders:", error);
-          // 失敗時は最低限の基本フォルダー構造を確保してフォールバック
           setFolders(['inbox', 'sent', 'drafts']);
         }
       } else {
-        // モック環境下でのアカウント別フォルダのダミー切り替え挙動
         if (activeAccount === 'work') {
           setFolders(['inbox', 'Sent Items', 'drafts', 'プログラミング', '重要案件']);
         } else {
@@ -156,7 +144,6 @@ function App() {
     loadFoldersForAccount().catch(err => console.error("Folder load error:", err));
   }, [activeAccount]);
 
-  // 💡 安全にフォルダー名の文字列を解決して取得するヘルパー関数
   const resolveTargetFolder = (): string => {
     try {
       return emailHook.getServerFolder();
@@ -217,8 +204,6 @@ function App() {
         } catch (error) {
           console.error(error);
           alert("下書きの読み込みに失敗しました");
-        } finally {
-          // 必要に応じたクリーンアップ処理をここに記述
         }
       } else {
         setTimeout(() => {
@@ -485,14 +470,13 @@ function App() {
   };
 
   const getFolderDisplayLabel = (folderName: string): string => {
-    // サーバー固有のフォルダ名表記を考慮し、部分一致または判定ロジックを最適化
     const normalized = folderName.toLowerCase();
     if (normalized === 'inbox') return '受信トレイ';
     if (normalized.includes('sent')) return '送信済み';
     if (normalized.includes('draft')) return '下書き';
     if (normalized.includes('flagged') || normalized.includes('star')) return '星付き';
     if (normalized === 'urgent') return '至急対応';
-    return folderName; // ユーザーカスタムフォルダ名はそのまま返却
+    return folderName;
   };
 
   const handleAddAccountSubmit = async (formEvent: React.FormEvent) => {
@@ -536,7 +520,6 @@ function App() {
     return emailHook.sortConfig.direction === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />;
   };
 
-  // 🛠️ APIキーを永続化保存し、モーダルを閉じるためのハンドラー
   const handleSaveSettings = () => {
     if (localApiKey.trim()) {
       gemini.saveApiKey(localApiKey);
@@ -560,13 +543,14 @@ function App() {
         />
 
         <Sidebar
-            folders={folders} // ✨ 新設した動的フォルダ一覧配列をバインド
+            folders={folders}
             activeFolder={activeFolder}
             currentDisplayCount={emailHook.currentDisplayCount}
             isDarkMode={isDarkMode}
             onSelectFolder={(folderName) => {
               setActiveFolder(folderName);
               emailHook.setCurrentPage(0);
+              emailHook.clearSearchAndRefresh();
               setReadingEmail(null);
               setIsDrawerOpen(false);
             }}
@@ -631,6 +615,7 @@ function App() {
                     handlePreviewEmail={handlePreviewEmail}
                     toggleReadStatus={emailHook.toggleReadStatus}
                     deleteEmail={(id, e) => emailHook.deleteEmail(id, e, currentEmailId === id, () => setReadingEmail(null))}
+                    clearSearchAndRefresh={emailHook.clearSearchAndRefresh}
                 />
 
                 <aside className={`side-drawer ${isDrawerOpen ? 'open' : ''}`}>
@@ -694,7 +679,6 @@ function App() {
               </div>
           )}
 
-          {/* 🛠️ 修正：position: fixed を明示的に指定し、確実に画面最前面（ウィンドウ中央）へ浮き上がるように変更 */}
           {gemini.showSettings && (
               <div
                   className="modal-overlay"

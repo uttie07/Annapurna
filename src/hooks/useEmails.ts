@@ -39,9 +39,7 @@ type SortConfig = {
  * useEmails カスタムフックへの入力引数の型定義
  */
 interface UseEmailsProps {
-  /** 現在アクティブに切り替えられているアカウント識別名 */
   activeAccount: string;
-  /** 現在選択されているフォルダ識別名 */
   activeFolder: string;
 }
 
@@ -138,6 +136,8 @@ interface UseEmailsReturn {
   extractEmailAddress: (fromStr: string) => string;
   /** ISO 8601等形式の時刻文字列を、画面表示用に 「YYYY-MM-DD HH:mm」へ成形する関数 */
   formatEmailDate: (dateStr: string) => string;
+  /** ✨ 新設: 検索クエリを完全に空にして、サーバーから通常の一覧を再取得する関数 */
+  clearSearchAndRefresh: () => Promise<void>;
 }
 
 /**
@@ -159,8 +159,6 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps): UseE
    * アクティブなフォルダ名をIMAPの物理フォルダ名にマッピング
    */
   const getServerFolder = (): string => {
-// 🛠️ 修正: 空文字、undefined、または 'inbox' (小文字) の場合は
-    // 全てサーバーが100%認識できる大文字の "INBOX" に強制変換します
     if (!activeFolder || activeFolder.toLowerCase() === "inbox" || activeFolder.trim() === "") {
       return "INBOX";
     }
@@ -181,9 +179,7 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps): UseE
       const hh = String(d.getHours()).padStart(2, '0');
       const mm = String(d.getMinutes()).padStart(2, '0');
       return `${y}-${m}-${day} ${hh}:${mm}`;
-    } catch {
-      return dateStr;
-    }
+    } catch { return dateStr; }
   };
 
   /**
@@ -233,9 +229,7 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps): UseE
             to: e.to ? formatSenderName(e.to) : undefined,
             email_address: extractEmailAddress(e.from),
             date: formatEmailDate(e.date),
-            snippet: '',
-            body: '',
-            aiCategories: [],
+            snippet: '', body: '', aiCategories: [],
             isRead: flags.some(f => f.toLowerCase().includes('seen')),
             isFlagged: flags.some(f => f.toLowerCase().includes('flagged')),
             isAnswered: flags.some(f => f.toLowerCase().includes('answered')),
@@ -254,35 +248,15 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps): UseE
         setIsRefreshing(false);
       }
     } else {
-      // ➔ モック環境（テスト用データフォールバック）
       await new Promise(resolve => setTimeout(resolve, 500));
-      const mockData: Email[] = [
-        {
-          id: "1",
-          account: activeAccount,
-          subject: `${activeAccount}アカウントのダミーメール`,
-          from: "Annapurna サポート",
-          email_address: "support@example.com",
-          date: formatEmailDate(new Date().toISOString()),
-          snippet: "クリーンアップ検証用のダミーテキストです。",
-          body: "<div>フックのリファクタリングが成功しています。</div>",
-          aiCategories: ["重要"],
-          isRead: false,
-          isFlagged: true,
-          isAnswered: false,
-          isDraft: false,
-          isDeleted: false
-        },
-      ];
-      setEmails(mockData);
+      setEmails([]);
       setCurrentPage(targetPage);
       setHasMore(false);
       setIsRefreshing(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeAccount, activeFolder]); // 👈 依存する外部状態を記述
+  }, [activeAccount, activeFolder]);
 
-  // ✨ アカウントまたはフォルダが切り替わったら、自動的に0ページ目から再読み込み
   useEffect(() => {
     fetchEmails(0);
   }, [fetchEmails]);
@@ -290,6 +264,11 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps): UseE
   /**
    * メモリ上で検索クエリ、フォルダ分類、未読チェック、ソートを高速適用する算出プロパティ
    */
+  const clearSearchAndRefresh = async (): Promise<void> => {
+    setSearchQuery('');
+    await fetchEmails(0);
+  };
+
   const filteredAndSortedEmails = useMemo(() => {
     let result = emails.filter(e => e.account === activeAccount);
 
@@ -354,7 +333,6 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps): UseE
         }
       } catch (error) {
         console.error("Flag update failed", error);
-        // ロールバック（エラー時は元の状態に戻す）
         setEmails(prev => prev.map(em => em.id === id ? { ...em, isRead: isCurrentlyRead } : em));
       }
     }
@@ -381,7 +359,6 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps): UseE
         }
       } catch (error) {
         console.error("Flag update failed", error);
-        // ロールバック
         setEmails(prev => prev.map(em => em.id === id ? { ...em, isFlagged: isCurrentlyFlagged } : em));
       }
     }
@@ -420,9 +397,8 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps): UseE
         try {
           await invoke('add_email_flags', { account: activeAccount, folder: getServerFolder(), ids: idsToUpdate, flags: ["Seen"] });
         } catch (error) {
-          console.error("Bulk read failed", error);
+          console.error("Bulk read failed", error); }
         }
-      }
     } else {
       setEmails(prev => prev.map(em => idsToUpdate.includes(em.id) ? { ...em, isDeleted: true } : em));
       setSelectedIds([]);
@@ -466,5 +442,6 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps): UseE
     formatSenderName,
     extractEmailAddress,
     formatEmailDate,
+    clearSearchAndRefresh
   };
 }
