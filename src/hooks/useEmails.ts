@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 // 💡 モック環境でテスト・画面改善を行う場合は true、実サーバーに繋ぐ場合は false
 const USE_MOCK = false;
@@ -41,6 +42,7 @@ type SortConfig = {
 interface UseEmailsProps {
   activeAccount: string;
   activeFolder: string;
+  onProgressUpdate?: (progress: { current: number; total: number } | null) => void;
 }
 
 /**
@@ -57,95 +59,16 @@ interface GetEmailsResponse {
   }>;
   totalCount: number;
 }
-
-/**
- * useEmails カスタムフックの戻り値（外部へ公開するインターフェース）型定義
- */
-interface UseEmailsReturn {
-  /** フェッチされたメールデータの全配列（フィルタ前のマスタ） */
-  emails: Email[];
-  /** メールデータマスタを更新するセッター関数 */
-  setEmails: React.Dispatch<React.SetStateAction<Email[]>>;
-  /** 現在適用されているソートの設定情報 */
-  sortConfig: SortConfig;
-  /** ソート設定を更新するセッター関数 */
-  setSortConfig: (config: SortConfig) => void;
-  /** チェックボックスで一括選択されているメールIDの配列 */
-  selectedIds: string[];
-  /** 一括選択のID配列を更新するセッター関数 */
-  setSelectedIds: React.Dispatch<React.SetStateAction<string[]>>;
-  /** 同期・再取得が実行中かどうかのローディングフラグ */
-  isRefreshing: boolean;
-  /** 検索バーに入力されている文字列のState */
-  searchQuery: string;
-  /** 検索文字列を更新するセッター関数 */
-  setSearchQuery: (query: string) => void;
-  /** 未読メールのみに絞り込むかどうかのフラグState */
-  filterUnread: boolean;
-  /** 未読フィルタの状態を反転・更新するセッター関数 */
-  setFilterUnread: (filter: boolean) => void;
-  /** ページネーションの現在ページ番号（0スタート） */
-  currentPage: number;
-  /** 現在ページ番号を更新するセッター関数 */
-  setCurrentPage: (page: number) => void;
-  /** 次のページのデータがサーバー側に存在するかどうかのフラグ */
-  hasMore: boolean;
-  /** hasMore の状態を更新するセッター関数 */
-  setHasMore: (more: boolean) => void;
-  /** 1ページあたりの最大表示レコード定数（50固定） */
-  PAGE_SIZE: number;
-  /** 現在の検索・フォルダ・未読フィルタ・ソートをすべて適用した、画面にループ描画すべきメール配列 */
-  filteredAndSortedEmails: Email[];
-  /** 画面下部のフッターに表示する、現在の累積表示件数 */
-  currentDisplayCount: number;
-  /** 現在のアクティブフォルダに対応する、サーバー（IMAP）側の物理フォルダ名（"INBOX" 等）を返す関数 */
-  getServerFolder: () => string;
-  /**
-   * サーバーまたはモックから指定されたページのメール一覧を非同期フェッチする関数
-   * @param page 取得対象のページ番号（0スタート）
-   */
-  fetchEmails: (page?: number) => Promise<void>;
-  /**
-   * 特定のメールの既読 / 未読状態を反転させ、サーバーの "Seen" フラグを同期する関数
-   * @param id 対象のメールID
-   * @param e イベント伝播を抑制するためのマウスイベント
-   */
-  toggleReadStatus: (id: string, e: React.MouseEvent) => Promise<void>;
-  /**
-   * 特定のメールの星付き（フラグ）状態を反転させ、サーバーの "Flagged" フラグを同期する関数
-   * @param id 対象のメールID
-   * @param e イベント伝播を抑制するためのマウスイベント
-   */
-  toggleFlagStatus: (id: string, e: React.MouseEvent) => Promise<void>;
-  /**
-   * 特定のメールをゴミ箱へ移動（または削除）し、詳細画面の選択をクリアする関数
-   * @param id 対象のメールID
-   * @param e イベント伝播を抑制するためのマウスイベント
-   * @param isReading 現在削除対象のメールを開いているかどうかのフラグ
-   * @param setReadingNull 開いている詳細表示を閉じるためのコールバック関数
-   */
-  deleteEmail: (id: string, e: React.MouseEvent, isReading: boolean, setReadingNull: () => void) => Promise<void>;
-  /**
-   * チェックボックスで選択された全メールに対して、一括既読化または一括削除をバッチ実行する関数
-   * @param action 実行したい操作の識別子 ('read' | 'delete')
-   */
-  handleBulkAction: (action: 'read' | 'delete') => Promise<void>;
-  /** From等の複雑なRFC文字列から、表示用の純粋な「差出人氏名」のみをパースする関数 */
-  formatSenderName: (fromStr: string) => string;
-  /** From等の複雑なRFC文字列から、`<...>` に囲まれた純粋な「メールアドレス」のみをパースする関数 */
-  extractEmailAddress: (fromStr: string) => string;
-  /** ISO 8601等形式の時刻文字列を、画面表示用に 「YYYY-MM-DD HH:mm」へ成形する関数 */
-  formatEmailDate: (dateStr: string) => string;
-  /** ✨ 新設: 検索クエリを完全に空にして、サーバーから通常の一覧を再取得する関数 */
-  clearSearchAndRefresh: () => Promise<void>;
-}
-
 /**
  * メール一覧の取得・状態管理・検索・フィルタリング、およびバックエンドへのフラグ更新の
  * すべてのインフラストラクチャロジックを統括する、アプリケーションのコア・カスタムフック。
  * @returns 画面コンポーネント（EmailList, EmailDetail等）へ受け渡す全データとコールバック
  */
-export function useEmails({ activeAccount, activeFolder }: UseEmailsProps): UseEmailsReturn {
+export const useEmails = ({
+                            activeAccount,
+                            activeFolder,
+                            onProgressUpdate
+                          }: UseEmailsProps) => {
   const [emails, setEmails] = useState<Email[]>([]);
   const [sortConfig, setSortConfig] = useState<SortConfig>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -366,25 +289,45 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps): UseE
 
   /**
    * 単一メールの削除（ゴミ箱移動）処理
+   * **AIへの指示 / 開発者への注意**:
+   * 削除進捗（onProgressUpdate）を更新する際は、Reactの同期レンダリング連鎖（cascading renders）を防ぐため、
+   * 必ず `setTimeout` を使用して非同期マクロタスクとしてスケジュールしてください。
    */
   const deleteEmail = async (id: string, e: React.MouseEvent, isReading: boolean, setReadingNull: () => void): Promise<void> => {
     e.stopPropagation();
-    setEmails(prev => prev.map(em => em.id === id ? { ...em, isDeleted: true } : em));
     if (isReading) setReadingNull();
 
     if (!USE_MOCK) {
+      // 💡 1件削除時のゲージ初期状態を安全に非同期スケジュール
+      if (onProgressUpdate) {
+        setTimeout(() => {
+          if (onProgressUpdate) onProgressUpdate({ current: 0, total: 1 });
+        }, 0);
+      }
+
       try {
         await invoke('delete_emails', { account: activeAccount, folder: getServerFolder(), ids: [id] });
+        // サーバー通信が無事完了してからリストから消去（同期ズレ防止）
+        setEmails(prev => prev.map(em => em.id === id ? { ...em, isDeleted: true } : em));
       } catch (error) {
         console.error("Delete failed", error);
         alert(`削除に失敗しました: ${error}`);
-        setEmails(prev => prev.map(em => em.id === id ? { ...em, isDeleted: false } : em));
+      } finally {
+        // 💡 クローズ処理も非同期の枠組みで行う
+        setTimeout(() => {
+          if (onProgressUpdate) onProgressUpdate(null);
+        }, 0);
       }
+    } else {
+      setEmails(prev => prev.map(em => em.id === id ? { ...em, isDeleted: true } : em));
     }
   };
 
   /**
    * チェックボックス選択された複数アイテムの一括バッチ処理
+   * **AIへの指示 / 開発者への注意**:
+   * 削除進捗（onProgressUpdate）を更新する際は、Reactの同期レンダリング連鎖（cascading renders）を防ぐため、
+   * 必ず `setTimeout` を使用して非同期マクロタスクとしてスケジュールしてください。
    */
   const handleBulkAction = async (action: 'read' | 'delete'): Promise<void> => {
     const idsToUpdate = [...selectedIds];
@@ -397,19 +340,54 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps): UseE
         try {
           await invoke('add_email_flags', { account: activeAccount, folder: getServerFolder(), ids: idsToUpdate, flags: ["Seen"] });
         } catch (error) {
-          console.error("Bulk read failed", error); }
+          console.error("Bulk read failed", error);
         }
+      }
     } else {
-      setEmails(prev => prev.map(em => idsToUpdate.includes(em.id) ? { ...em, isDeleted: true } : em));
+      // 🗑️ 一括削除の実行
       setSelectedIds([]);
+
       if (!USE_MOCK) {
+        let unlistenProgress: (() => void) | null = null;
+
+        // ゲージの初期状態を設定してリスナーを登録
+        if (onProgressUpdate) {
+          // 💡 レンダリング連鎖を防ぐため、マクロタスクへ逃がす
+          setTimeout(() => {
+            if (onProgressUpdate) onProgressUpdate({ current: 0, total: idsToUpdate.length });
+          }, 0);
+
+          // Rust側から1件消すごとに飛んでくるイベントをキャッチ
+          unlistenProgress = await listen<[number, number]>('delete-progress', (event) => {
+            const [current, total] = event.payload;
+            // 💡 ESLint (set-state-in-effect) 回避策:
+            // 効果割り込み中の同期処理を避け、イベントループの次のサイクルで安全にステートを更新する
+            setTimeout(() => {
+              if (onProgressUpdate) onProgressUpdate({ current, total });
+            }, 0);
+          });
+        }
+
         try {
+          // バックエンドの一括削除が100%完了するまで待機（同期保証）
           await invoke('delete_emails', { account: activeAccount, folder: getServerFolder(), ids: idsToUpdate });
+
+          // 通信完了後、対象のメールを一括で削除表示にする
+          setEmails(prev => prev.map(em => idsToUpdate.includes(em.id) ? { ...em, isDeleted: true } : em));
         } catch (error) {
           console.error("Bulk delete failed", error);
-          alert(`削除に失敗しました: ${error}`);
-          setEmails(prev => prev.map(em => idsToUpdate.includes(em.id) ? { ...em, isDeleted: false } : em));
+          alert(`一括削除中にエラーが発生しました: ${error}`);
+        } finally {
+          // イベント監視の解除とゲージ終了通知
+          if (unlistenProgress) unlistenProgress();
+
+          // 💡 クローズ処理も非同期の枠組みで行う
+          setTimeout(() => {
+            if (onProgressUpdate) onProgressUpdate(null);
+          }, 0);
         }
+      } else {
+        setEmails(prev => prev.map(em => idsToUpdate.includes(em.id) ? { ...em, isDeleted: true } : em));
       }
     }
   };

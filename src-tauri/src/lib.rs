@@ -27,6 +27,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use email::folder::expunge::ExpungeFolder;
 use email::message::r#move::MoveMessages;
+use tauri::Emitter;
 
 // ====================================================================
 // annapurna.toml のフラット構造を 100% 正確にパースする型定義
@@ -441,6 +442,7 @@ async fn remove_email_flags(account: String, folder: Option<String>, ids: Vec<St
 }
 
 /// 指定されたアカウントおよびフォルダから、複数のメールを削除（ゴミ箱へ移動）します。
+/// 削除中のリアルタイムな進捗状況をフロントエンドへイベント通知します。
 ///
 /// **AIへの指示 / 開発者への注意**:
 /// もし削除のフォールバック順序（標準 -> Gmail -> フラグ）を変更・修正した場合は、
@@ -450,8 +452,10 @@ async fn remove_email_flags(account: String, folder: Option<String>, ids: Vec<St
 /// 1. `delete_messages` による標準のMOVEを試行
 /// 2. 失敗時、`[Gmail]/ゴミ箱` への明示的な移動を試行
 /// 3. それでも失敗時、`\Deleted` フラグ付与と `expunge_folder` を実行
+/// 4. 1件完了するごとに `delete-progress` イベントをフロントエンドへ通知
 ///
 /// # 引数
+/// * `window` - Tauri ウィンドウインスタンス（フロントエンドへのイベント通知用）
 /// * `account` - 操作対象のアカウント名（TOMLのキー）
 /// * `folder` - 対象のフォルダ名。`None` の場合は `"INBOX"` が使用されます
 /// * `ids` - 削除対象のメールIDのリスト
@@ -459,7 +463,12 @@ async fn remove_email_flags(account: String, folder: Option<String>, ids: Vec<St
 /// # 戻り値
 /// 成功した場合は `Ok(())`、失敗した場合はエラーメッセージ文字列を `Err` で返します。
 #[tauri::command]
-async fn delete_emails(account: String, folder: Option<String>, ids: Vec<String>) -> Result<(), String> {
+async fn delete_emails(
+    window: tauri::Window,
+    account: String,
+    folder: Option<String>,
+    ids: Vec<String>,
+) -> Result<(), String> {
     // 1. 設定ファイルのロードとアカウント設定の構築
     let toml_data = load_annapurna_toml()?;
     let raw_account = toml_data.accounts.get(&account)
@@ -477,19 +486,23 @@ async fn delete_emails(account: String, folder: Option<String>, ids: Vec<String>
 
     let target_folder = folder.unwrap_or_else(|| "INBOX".to_string());
     let gmail_trash = "[Gmail]/ゴミ箱".to_string();
+    let total_count = ids.len();
 
     // 3. 各メールの削除処理（フォールバック付き）
-    for id in ids {
-        let target_id = Id::Single(SingleId::from(id));
+    for (index, id) in ids.iter().enumerate() {
+        let target_id = Id::Single(SingleId::from(id.clone()));
+        let current_progress = index + 1;
 
         // ステップA: まず標準の削除（MOVE）を試みる
         if backend.delete_messages(&target_folder, &target_id).await.is_ok() {
+            let _ = window.emit("delete-progress", (current_progress, total_count));
             continue;
         }
         log::debug!("通常の削除に失敗したため、Gmail向けのゴミ箱移動を試みます。");
 
         // ステップB: Gmail固有のゴミ箱フォルダへの移動を試みる
         if backend.move_messages(&target_folder, &gmail_trash, &target_id).await.is_ok() {
+            let _ = window.emit("delete-progress", (current_progress, total_count));
             continue;
         }
         log::warn!("ゴミ箱フォルダへの直接移動に失敗しました。最終手段として直接削除フラグを付与します。");
@@ -501,6 +514,9 @@ async fn delete_emails(account: String, folder: Option<String>, ids: Vec<String>
 
         backend.expunge_folder(&target_folder).await
             .map_err(|e| format!("削除確定（EXPUNGE）に失敗: {}", e))?;
+
+        // フロントエンドに進捗イベントをリアルタイム通知
+        let _ = window.emit("delete-progress", (current_progress, total_count));
     }
 
     Ok(())

@@ -39,7 +39,12 @@ function App() {
   const [folders, setFolders] = useState<string[]>([]);
   const [activeFolder, setActiveFolder] = useState<string>('inbox');
   const [isDarkMode, setIsDarkMode] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
-  const emailHook = useEmails({ activeAccount, activeFolder });
+  const [deleteProgress, setDeleteProgress] = useState<{ current: number; total: number } | null>(null);
+  const emailHook = useEmails({
+    activeAccount,
+    activeFolder,
+    onProgressUpdate: setDeleteProgress
+  });
 
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [composeTo, setComposeTo] = useState('');
@@ -800,14 +805,56 @@ function App() {
               handleComposeSend={handleComposeSend}
           />
 
-          {(emailHook.isRefreshing || isSending || isComposeSending || isDownloading || successMessage || errorMessage) && (
-              <div className="global-loading-overlay" style={{ zIndex: 1100 }}>
-                <div className="global-loading-content">
-                  {(emailHook.isRefreshing || isSending || isComposeSending || isDownloading) && <RefreshCw size={48} className="spin global-loading-spinner" />}
-                  <div className="global-loading-text">{successMessage || errorMessage || '処理中...'}</div>
-                </div>
-              </div>
-          )}
+          {/* ✨ 修正: 削除進捗判定（deleteProgress）を最優先で綺麗に展開するIIFE構造 */}
+          {(() => {
+            if (deleteProgress) {
+              return (
+                  <div className="global-loading-overlay" style={{ zIndex: 1200 }}>
+                    <div className="global-loading-content" style={{ minWidth: '320px', padding: '24px 36px' }}>
+                      <div style={{ width: '100%', marginBottom: '4px' }}>
+                        <div style={{ fontWeight: 700, fontSize: '1.05rem', marginBottom: '10px', color: 'var(--text-main, #111827)' }}>
+                          メールを安全に同期削除中...
+                        </div>
+
+                        {/* ゲージの外枠 */}
+                        <div style={{ width: '100%', height: '8px', backgroundColor: 'var(--border-color, #e5e7eb)', borderRadius: '999px', overflow: 'hidden', marginBottom: '12px' }}>
+                          {/* ゲージの内枠（進捗に応じて伸びる青いバー） */}
+                          <div style={{
+                            width: `${(deleteProgress.current / deleteProgress.total) * 100}%`,
+                            height: '100%',
+                            backgroundColor: '#2563eb',
+                            borderRadius: '999px',
+                            transition: 'width 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
+                          }} />
+                        </div>
+
+                        <div style={{ fontSize: '0.9rem', color: 'var(--text-muted, #6b7280)', fontWeight: 600, marginBottom: '4px' }}>
+                          {deleteProgress.current} / {deleteProgress.total} 件を完了
+                        </div>
+                      </div>
+                      <div className="global-loading-text" style={{ fontSize: '1rem', marginTop: '4px' }}>
+                        {Math.round((deleteProgress.current / deleteProgress.total) * 100)}% 完了
+                      </div>
+                    </div>
+                  </div>
+              );
+            }
+
+            if (emailHook.isRefreshing || isSending || isComposeSending || isDownloading || successMessage || errorMessage) {
+              return (
+                  <div className="global-loading-overlay" style={{ zIndex: 1100 }}>
+                    <div className="global-loading-content">
+                      {(emailHook.isRefreshing || isSending || isComposeSending || isDownloading) && (
+                          <RefreshCw size={48} className="spin global-loading-spinner" />
+                      )}
+                      <div className="global-loading-text">{successMessage || errorMessage || '処理中...'}</div>
+                    </div>
+                  </div>
+              );
+            }
+
+            return null;
+          })()}
         </div>
       </div>
   );
