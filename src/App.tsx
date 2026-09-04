@@ -19,6 +19,7 @@ const USE_MOCK = false;
 type Email = {
   id: string; subject: string; from: string; to?: string; email_address: string; date: string; snippet: string;
   body: string; aiCategories: string[]; account: string;
+  aiScore: number; aiReason: string;
   isRead: boolean; isFlagged: boolean; isAnswered: boolean; isDraft: boolean; isDeleted: boolean;
   attachmentsList?: string[];
 };
@@ -440,6 +441,8 @@ function App() {
             snippet: '',
             body: '',
             aiCategories: [],
+            aiScore: (e as any).aiScore ?? 0,      // 👈 追加
+            aiReason: (e as any).aiReason ?? '',  // 👈 追加
             isRead: flags.some(f => f.toLowerCase().includes('seen')),
             isFlagged: flags.some(f => f.toLowerCase().includes('flagged')),
             isAnswered: flags.some(f => f.toLowerCase().includes('answered')),
@@ -574,7 +577,7 @@ function App() {
                   replyText={gemini.replyText}
                   isSending={isSending}
                   isGeneratingReply={gemini.isGeneratingReply}
-                  setReadingEmail={setReadingEmail}
+                  setReadingEmail={(email) => setReadingEmail(email)}
                   analyzeEmailWithGemini={gemini.analyzeEmailWithGemini}
                   handleServerSearch={handleServerSearch}
                   handleDownloadAttachment={handleDownloadAttachment}

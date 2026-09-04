@@ -3,12 +3,12 @@ import { invoke } from '@tauri-apps/api/core';
 
 // 💡 モック環境でテスト・画面改善を行う場合は true、実サーバーに繋ぐ場合は false
 const USE_MOCK = false;
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 200;
 
 /**
  * メールデータのオブジェクト構造定義
  */
-type Email = {
+export type Email = {
   id: string;
   subject: string;
   from: string;
@@ -18,6 +18,8 @@ type Email = {
   snippet: string;
   body: string;
   aiCategories: string[];
+  aiScore: number;       // ✨ 追加: ローカルAI不要判定スコア (0-100)
+  aiReason: string;      // ✨ 追加: スコア判定理由
   account: string;
   isRead: boolean;
   isFlagged: boolean;
@@ -54,6 +56,8 @@ interface GetEmailsResponse {
     to?: string;
     date: string;
     flags?: string[];
+    aiScore?: number;    // ✨ Rust側の camelCase 出力を反映
+    aiReason?: string;
   }>;
   totalCount: number;
 }
@@ -207,15 +211,15 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps): UseE
   const fetchEmails = useCallback(async (page: number = 0): Promise<void> => {
     if (!activeAccount) return;
     const targetPage = Math.max(0, page);
+    await Promise.resolve();
     setIsRefreshing(true);
     const isTauri = USE_MOCK ? false : ('__TAURI_INTERNALS__' in window);
-    const serverFolder = getServerFolder();
 
     if (isTauri) {
       try {
         const response = await invoke<GetEmailsResponse>('get_emails', {
           account: activeAccount,
-          folder: serverFolder,
+          folder: getServerFolder(),
           page: targetPage,
           pageSize: PAGE_SIZE
         });
@@ -229,7 +233,11 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps): UseE
             to: e.to ? formatSenderName(e.to) : undefined,
             email_address: extractEmailAddress(e.from),
             date: formatEmailDate(e.date),
-            snippet: '', body: '', aiCategories: [],
+            snippet: '',
+            body: '',
+            aiCategories: [],
+            aiScore: e.aiScore ?? 0,      // ✨ スコアを格納
+            aiReason: e.aiReason ?? '',  // ✨ 理由を格納
             isRead: flags.some(f => f.toLowerCase().includes('seen')),
             isFlagged: flags.some(f => f.toLowerCase().includes('flagged')),
             isAnswered: flags.some(f => f.toLowerCase().includes('answered')),
@@ -258,7 +266,17 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps): UseE
   }, [activeAccount, activeFolder]);
 
   useEffect(() => {
-    fetchEmails(0);
+    let ignore = false;
+    const load = async () => {
+      if (!ignore) {
+        await fetchEmails(0);
+      }
+    };
+    void load();
+
+    return () => {
+      ignore = true;
+    };
   }, [fetchEmails]);
 
   /**
@@ -365,16 +383,24 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps): UseE
   };
 
   /**
-   * 単一メールの削除（ゴミ箱移動）処理
+   * 単一メールの削除（学習用メタデータをバックエンドに送る）
    */
   const deleteEmail = async (id: string, e: React.MouseEvent, isReading: boolean, setReadingNull: () => void): Promise<void> => {
     e.stopPropagation();
+    const target = emails.find(em => em.id === id);
     setEmails(prev => prev.map(em => em.id === id ? { ...em, isDeleted: true } : em));
     if (isReading) setReadingNull();
 
     if (!USE_MOCK) {
       try {
-        await invoke('delete_emails', { account: activeAccount, folder: getServerFolder(), ids: [id] });
+        await invoke('delete_emails', {
+          account: activeAccount,
+          folder: getServerFolder(),
+          ids: [id],
+          froms: [target?.from || ''],
+          fromAddresses: [target?.email_address || ''],
+          subjects: [target?.subject || '']
+        });
       } catch (error) {
         console.error("Delete failed", error);
         alert(`削除に失敗しました: ${error}`);
@@ -384,7 +410,7 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps): UseE
   };
 
   /**
-   * チェックボックス選択された複数アイテムの一括バッチ処理
+   * 一括削除（選択された全メールのメタデータをまとめて学習用に送る）
    */
   const handleBulkAction = async (action: 'read' | 'delete'): Promise<void> => {
     const idsToUpdate = [...selectedIds];
@@ -397,14 +423,23 @@ export function useEmails({ activeAccount, activeFolder }: UseEmailsProps): UseE
         try {
           await invoke('add_email_flags', { account: activeAccount, folder: getServerFolder(), ids: idsToUpdate, flags: ["Seen"] });
         } catch (error) {
-          console.error("Bulk read failed", error); }
+          console.error("Bulk read failed", error);
         }
+      }
     } else {
+      const targets = emails.filter(em => idsToUpdate.includes(em.id));
       setEmails(prev => prev.map(em => idsToUpdate.includes(em.id) ? { ...em, isDeleted: true } : em));
       setSelectedIds([]);
       if (!USE_MOCK) {
         try {
-          await invoke('delete_emails', { account: activeAccount, folder: getServerFolder(), ids: idsToUpdate });
+          await invoke('delete_emails', {
+            account: activeAccount,
+            folder: getServerFolder(),
+            ids: idsToUpdate,
+            froms: targets.map(t => t.from),
+            fromAddresses: targets.map(t => t.email_address),
+            subjects: targets.map(t => t.subject)
+          });
         } catch (error) {
           console.error("Bulk delete failed", error);
           alert(`削除に失敗しました: ${error}`);

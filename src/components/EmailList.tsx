@@ -14,6 +14,8 @@ type Email = {
     snippet: string;
     body: string;
     aiCategories: string[];
+    aiScore: number;
+    aiReason: string;
     account: string;
     isRead: boolean;
     isFlagged: boolean;

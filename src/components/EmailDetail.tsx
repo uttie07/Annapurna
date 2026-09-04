@@ -8,22 +8,24 @@ import {
  * メールデータのオブジェクト構造定義
  */
 type Email = {
-  id: string;
-  subject: string;
-  from: string;
-  to?: string;
-  email_address: string;
-  date: string;
-  snippet: string;
-  body: string;
-  aiCategories: string[];
-  account: string;
-  isRead: boolean;
-  isFlagged: boolean;
-  isAnswered: boolean;
-  isDraft: boolean;
-  isDeleted: boolean;
-  attachmentsList?: string[];
+    id: string;
+    subject: string;
+    from: string;
+    to?: string;
+    email_address: string;
+    date: string;
+    snippet: string;
+    body: string;
+    aiCategories: string[];
+    aiScore: number;
+    aiReason: string;
+    account: string;
+    isRead: boolean;
+    isFlagged: boolean;
+    isAnswered: boolean;
+    isDraft: boolean;
+    isDeleted: boolean;
+    attachmentsList?: string[];
 };
 
 /**
